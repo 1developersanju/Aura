@@ -54,10 +54,8 @@ function SignupForm() {
         </Link>
       </p>
       <p className="mt-3 rounded-lg bg-accent/10 px-3 py-2 text-xs text-accent ring-1 ring-accent/25">
-        Placement is automatic: each member can hold {MAX_DIRECTS} directs, then
-        new joiners spill over deeper in the tree (grows without a hard depth
-        cap). An invite code only prefers that sponsor if they still have an open
-        slot.
+        Placement is sequential by join time: each member can hold {MAX_DIRECTS}{" "}
+        directs, then the next joiner fills the next open slot left-to-right.
       </p>
       {mode === "demo" && (
         <p className="mt-2 text-xs text-muted">Demo mode — data stays in this browser.</p>

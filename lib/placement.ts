@@ -10,16 +10,20 @@ export type PlacementMember = {
   createdAt: string;
 };
 
+function byJoinOrder(a: PlacementMember, b: PlacementMember): number {
+  const t = a.createdAt.localeCompare(b.createdAt);
+  return t !== 0 ? t : a.uid.localeCompare(b.uid);
+}
+
 /**
- * Breadth-first spillover: each member can hold up to MAX_DIRECTS directs.
- * Tree grows infinitely by filling level-by-level.
- * Optional preferredParent is used when they still have an open slot.
+ * Sequential BFS fill: earliest donor is root. Each next joiner takes the
+ * leftmost open slot (max MAX_DIRECTS per person), then spillover to the
+ * next member in join order. Invite codes do not jump the queue.
  */
 export function findSpilloverParent(
-  members: PlacementMember[],
-  preferredParentId?: string | null
+  members: PlacementMember[]
 ): string | null {
-  const pool = members.filter((u) => u.role !== "admin");
+  const pool = members.filter((u) => u.role !== "admin").sort(byJoinOrder);
   if (pool.length === 0) return null;
 
   const childCount = new Map<string, number>();
@@ -28,17 +32,7 @@ export function findSpilloverParent(
     childCount.set(u.referredBy, (childCount.get(u.referredBy) ?? 0) + 1);
   }
 
-  if (preferredParentId) {
-    const preferred = pool.find((u) => u.uid === preferredParentId);
-    if (preferred && (childCount.get(preferred.uid) ?? 0) < MAX_DIRECTS) {
-      return preferred.uid;
-    }
-  }
-
-  const roots = pool
-    .filter((u) => !u.referredBy)
-    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-
+  const roots = pool.filter((u) => !u.referredBy);
   const queue = [...roots];
   const seen = new Set<string>();
 
@@ -51,36 +45,28 @@ export function findSpilloverParent(
       return node.uid;
     }
 
-    const kids = pool
-      .filter((u) => u.referredBy === node.uid)
-      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    const kids = pool.filter((u) => u.referredBy === node.uid).sort(byJoinOrder);
     queue.push(...kids);
   }
 
-  // Fallback: earliest member (should be unreachable if MAX_DIRECTS > 0)
   return roots[0]?.uid ?? pool[0]?.uid ?? null;
 }
 
 /**
  * Rebuild the whole tree in signup order: earliest donor is root,
- * each next donor is BFS-spillover placed under the growing tree.
- * Admins are left with referredBy = null.
+ * each next donor is sequential BFS-spillover under the growing tree.
+ * Admins stay outside the tree (referredBy = null).
  */
 export function rebuildSpilloverAssignments(
   members: PlacementMember[]
 ): Map<string, string | null> {
-  const donors = members
-    .filter((u) => u.role !== "admin")
-    .sort((a, b) => {
-      const t = a.createdAt.localeCompare(b.createdAt);
-      return t !== 0 ? t : a.uid.localeCompare(b.uid);
-    });
+  const donors = members.filter((u) => u.role !== "admin").sort(byJoinOrder);
 
   const result = new Map<string, string | null>();
   const placed: PlacementMember[] = [];
 
   for (const m of donors) {
-    const parent = findSpilloverParent(placed, null);
+    const parent = findSpilloverParent(placed);
     result.set(m.uid, parent);
     placed.push({ ...m, referredBy: parent });
   }

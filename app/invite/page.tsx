@@ -26,9 +26,9 @@ function InvitePanel() {
     <div className="mx-auto w-full max-w-lg px-4 py-16">
       <h1 className="font-display text-3xl text-foreground">Grow the network</h1>
       <p className="mt-2 text-sm text-muted">
-        New members are placed automatically (up to {MAX_DIRECTS} under each
-        person, then spillover deeper). Sharing your link prefers you as sponsor
-        when you still have an open slot.
+        New members fill the next open slot in join order (up to {MAX_DIRECTS}{" "}
+        under each person, then spillover left-to-right). Your link is for
+        sharing — it does not jump the queue.
       </p>
       <div className="panel mt-8 space-y-5">
         <div>

@@ -39,6 +39,12 @@ function buildForest(users: AuraUser[]): {
     if (!childrenMap[u.referredBy]) childrenMap[u.referredBy] = [];
     childrenMap[u.referredBy]!.push(u);
   }
+  for (const kids of Object.values(childrenMap)) {
+    kids.sort((a, b) => {
+      const t = a.createdAt.localeCompare(b.createdAt);
+      return t !== 0 ? t : a.uid.localeCompare(b.uid);
+    });
+  }
 
   function nodeFor(u: AuraUser, seen: Set<string>): TreeNode {
     if (seen.has(u.uid)) {
@@ -53,6 +59,10 @@ function buildForest(users: AuraUser[]): {
   }
 
   const roots = users.filter((u) => !u.referredBy || !byId[u.referredBy]);
+  roots.sort((a, b) => {
+    const t = a.createdAt.localeCompare(b.createdAt);
+    return t !== 0 ? t : a.uid.localeCompare(b.uid);
+  });
   const withKids = roots.filter((u) => (childrenMap[u.uid]?.length ?? 0) > 0);
   const list = (withKids.length ? withKids : roots).filter((u) => u.role !== "admin");
   const forest = (list.length ? list : roots).map((u) => nodeFor(u, new Set()));
@@ -204,6 +214,7 @@ export default function AdminPoolTreePage() {
   );
 
   async function reload() {
+    await getApi().rebuildSpilloverTree();
     setUsers(await getApi().listUsers());
     setLoading(false);
   }
@@ -298,7 +309,7 @@ export default function AdminPoolTreePage() {
     <div className="space-y-5">
       <PageHeader
         title="Network tree"
-        description="Expand with the chevron, or click a member to drill into their branch. Max 5 directs, then spillover."
+        description="Members sit in join order: first donor is root, each next person fills the next open slot (max 5 directs), then spillover left-to-right."
         actions={
           <>
             <button
@@ -341,11 +352,11 @@ export default function AdminPoolTreePage() {
         }
       />
 
-      {orphanRoots > 1 && (
+          {orphanRoots > 1 && (
         <InlineAlert tone="warn">
-          {orphanRoots} members look like separate roots (often created before
-          auto-placement). Use <strong>Rebuild tree</strong> so later accounts nest
-          under the first member.
+          {orphanRoots} members still look like separate roots. Sequential
+          placement should nest later accounts under the first member — reload
+          or use <strong>Rebuild tree</strong>.
         </InlineAlert>
       )}
       {message && <InlineAlert tone={messageTone}>{message}</InlineAlert>}

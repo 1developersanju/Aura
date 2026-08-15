@@ -153,6 +153,36 @@ function clearPendingReferral() {
   sessionStorage.removeItem(PENDING_REF_KEY);
 }
 
+async function applySequentialTree(): Promise<{
+  assignments: Map<string, string | null>;
+  updated: number;
+}> {
+  const db = getFirestoreDb()!;
+  const snap = await getDocs(collection(db, "users"));
+  const members = snap.docs.map((d) => {
+    const data = d.data();
+    return {
+      uid: d.id,
+      role: (data.role as UserRole) ?? "donor",
+      referredBy: (data.referredBy as string | null) ?? null,
+      createdAt: tsToIso(data.createdAt),
+    };
+  });
+  const assignments = rebuildSpilloverAssignments(members);
+  let updated = 0;
+  const batch = writeBatch(db);
+  for (const d of snap.docs) {
+    const next = assignments.get(d.id) ?? null;
+    const prev = (d.data().referredBy as string | null) ?? null;
+    if (prev !== next) {
+      batch.update(d.ref, { referredBy: next });
+      updated += 1;
+    }
+  }
+  if (updated > 0) await batch.commit();
+  return { assignments, updated };
+}
+
 export async function firebaseEnsureProfile(
   user: User,
   extras?: { displayName?: string; referralCode?: string }
@@ -165,7 +195,6 @@ export async function firebaseEnsureProfile(
     return mapAuraUser(user.uid, existing.data() as Record<string, unknown>);
   }
 
-  let preferredParent: string | null = null;
   const explicitCode = extras?.referralCode?.trim();
   const pendingFromStorage =
     typeof window !== "undefined" ? sessionStorage.getItem(PENDING_REF_KEY) : null;
@@ -174,11 +203,8 @@ export async function firebaseEnsureProfile(
   if (codeToUse) {
     const code = normalizeReferralCode(codeToUse);
     const codeSnap = await getDoc(doc(db, "referralCodes", code));
-    if (codeSnap.exists()) {
-      preferredParent = codeSnap.data().userId as string;
-    } else if (explicitCode) {
-      throw new Error("Invalid referral code.");
-    } else {
+    if (!codeSnap.exists()) {
+      if (explicitCode) throw new Error("Invalid referral code.");
       console.warn("Invalid referral code ignored:", code);
     }
   }
@@ -198,7 +224,7 @@ export async function firebaseEnsureProfile(
         createdAt: tsToIso(data.createdAt),
       };
     });
-    referredBy = findSpilloverParent(members, preferredParent);
+    referredBy = findSpilloverParent(members);
   }
 
   const referralCode = await uniqueReferralCode();
@@ -225,6 +251,10 @@ export async function firebaseEnsureProfile(
     createdAt: serverTimestamp(),
   });
   await setDoc(doc(db, "referralCodes", referralCode), { userId: user.uid });
+  const { assignments } = await applySequentialTree();
+  if (assignments.has(user.uid)) {
+    profile.referredBy = assignments.get(user.uid) ?? null;
+  }
   clearPendingReferral();
   return profile;
 }
@@ -402,29 +432,7 @@ export const firebaseApi = {
   },
 
   async rebuildSpilloverTree(): Promise<{ updated: number }> {
-    const db = getFirestoreDb()!;
-    const snap = await getDocs(collection(db, "users"));
-    const members = snap.docs.map((d) => {
-      const data = d.data();
-      return {
-        uid: d.id,
-        role: (data.role as UserRole) ?? "donor",
-        referredBy: (data.referredBy as string | null) ?? null,
-        createdAt: tsToIso(data.createdAt),
-      };
-    });
-    const assignments = rebuildSpilloverAssignments(members);
-    let updated = 0;
-    const batch = writeBatch(db);
-    for (const d of snap.docs) {
-      const next = assignments.get(d.id) ?? null;
-      const prev = (d.data().referredBy as string | null) ?? null;
-      if (prev !== next) {
-        batch.update(d.ref, { referredBy: next });
-        updated += 1;
-      }
-    }
-    if (updated > 0) await batch.commit();
+    const { updated } = await applySequentialTree();
     return { updated };
   },
 

@@ -215,16 +215,14 @@ export const demoDb = {
       throw new Error("Password must be at least 6 characters.");
     }
 
-    let preferredParent: string | null = null;
     if (input.referralCode?.trim()) {
       const code = normalizeReferralCode(input.referralCode);
       const inviterId = state.referralIndex[code];
       if (!inviterId) throw new Error("Invalid referral code.");
-      preferredParent = inviterId;
     }
 
     const role = resolveRole(email);
-    // Admins stay outside the spillover tree; donors auto-place (5-wide BFS).
+    // Admins stay outside the tree; donors fill the next sequential BFS slot.
     const referredBy =
       role === "admin"
         ? null
@@ -234,8 +232,7 @@ export const demoDb = {
               role: a.role,
               referredBy: a.referredBy,
               createdAt: a.createdAt,
-            })),
-            preferredParent
+            }))
           );
 
     let referralCode = generateReferralCode();
@@ -257,6 +254,17 @@ export const demoDb = {
 
     state.accounts.push(account);
     state.referralIndex[referralCode] = account.uid;
+    const sequential = rebuildSpilloverAssignments(
+      state.accounts.map((a) => ({
+        uid: a.uid,
+        role: a.role,
+        referredBy: a.referredBy,
+        createdAt: a.createdAt,
+      }))
+    );
+    for (const a of state.accounts) {
+      a.referredBy = sequential.get(a.uid) ?? null;
+    }
     state.sessionUid = account.uid;
     write(state);
     notifyDemoAuthChanged();

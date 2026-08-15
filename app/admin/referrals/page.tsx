@@ -46,7 +46,12 @@ export default function AdminReferralsPage() {
       if (!children[u.referredBy]) children[u.referredBy] = [];
       children[u.referredBy]!.push(u);
     }
-    const roots = users.filter((u) => (children[u.uid]?.length ?? 0) > 0);
+    for (const kids of Object.values(children)) {
+      kids.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    }
+    const roots = users
+      .filter((u) => (children[u.uid]?.length ?? 0) > 0 && !u.referredBy)
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     return { children, roots };
   }, [users]);
 
@@ -56,7 +61,7 @@ export default function AdminReferralsPage() {
     <div className="space-y-8">
       <PageHeader
         title="Referrals"
-        description="Invite edges and a simple tree. For full spillover placement, use Network tree."
+        description="Tree parents follow sequential join-order placement. For the full network, use Network tree."
         actions={
           <Link href="/admin/pool-tree" className="btn-ghost text-sm">
             Open network tree

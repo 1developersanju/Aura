@@ -1,4 +1,5 @@
 import { processEntryUnits, type EngineUser, type ProcessEntryResult } from "./pool-engine";
+import { tierFromReferralEarn } from "./pool-config";
 import type { PoolConfig, SplitAllocation } from "./types";
 
 export type RankedUser = EngineUser & { tier: number };
@@ -11,14 +12,19 @@ export type TierPromotion = {
   result: ProcessEntryResult;
 };
 
-function nextTierThreshold(
-  currentTier: number,
+function nextUnpaidTier(
+  paidPaise: number,
   pool: PoolConfig
 ): { tier: number; minPaise: number } | null {
+  const earned = tierFromFeesPaid(paidPaise, pool);
   const next = [...pool.tiers]
     .sort((a, b) => a.tier - b.tier)
-    .find((t) => t.tier === currentTier + 1);
+    .find((t) => t.tier === earned + 1);
   return next ? { tier: next.tier, minPaise: next.minPaise } : null;
+}
+
+function syncDisplayTier(user: RankedUser, pool: PoolConfig) {
+  user.tier = tierFromReferralEarn(user.referralEarnPaise, pool.tiers);
 }
 
 function mergeUpdates(
@@ -33,8 +39,9 @@ function mergeUpdates(
 }
 
 /**
- * When referral earn covers the next loyalty tier fee, deduct that fee,
- * run it through the 4-way pool, then promote. Cascades to upline who get paid.
+ * Charge unpaid upgrade fees from referral earn when the leftover covers
+ * the next fee. The badge follows leftover earn (pay Silver, leftover
+ * under ₹100 → Starter again). Already-paid fees are not charged twice.
  */
 export function runReferralTierPromotions(input: {
   usersById: Record<string, RankedUser>;
@@ -61,10 +68,13 @@ export function runReferralTierPromotions(input: {
     while (promotions.length < cap) {
       const user = usersById[userId];
       if (!user) break;
-      const next = nextTierThreshold(user.tier, input.pool);
+      const next = nextUnpaidTier(user.tierFeePaidPaise, input.pool);
       if (!next || user.referralEarnPaise < next.minPaise) break;
 
-      const fromTier = user.tier;
+      const fromTier = tierFromReferralEarn(
+        user.referralEarnPaise,
+        input.pool.tiers
+      );
       user.referralEarnPaise -= next.minPaise;
       voucherDebits[userId] = (voucherDebits[userId] ?? 0) + next.minPaise;
 
@@ -77,13 +87,13 @@ export function runReferralTierPromotions(input: {
         destinationNames: input.destinationNames,
       });
       mergeUpdates(usersById, result.userUpdates);
-      usersById[userId]!.tier = next.tier;
       usersById[userId]!.tierFeePaidPaise += next.minPaise;
+      syncDisplayTier(usersById[userId]!, input.pool);
 
       promotions.push({
         userId,
         fromTier,
-        toTier: next.tier,
+        toTier: usersById[userId]!.tier,
         costPaise: next.minPaise,
         result,
       });
@@ -95,6 +105,10 @@ export function runReferralTierPromotions(input: {
         }
       }
     }
+  }
+
+  for (const user of Object.values(usersById)) {
+    syncDisplayTier(user, input.pool);
   }
 
   return { usersById, promotions, voucherDebits };
@@ -152,9 +166,9 @@ export function settleLegacyTiers(input: {
   for (const id of input.donorIds) {
     const user = input.usersById[id];
     if (!user) continue;
-    const earnedTier = tierFromFeesPaid(user.tierFeePaidPaise, input.pool);
-    if (user.tier > earnedTier) demoted += 1;
-    user.tier = earnedTier;
+    const live = tierFromReferralEarn(user.referralEarnPaise, input.pool.tiers);
+    if (user.tier > live) demoted += 1;
+    syncDisplayTier(user, input.pool);
   }
 
   const { usersById, promotions, voucherDebits } = runReferralTierPromotions({

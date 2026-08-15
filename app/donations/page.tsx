@@ -43,7 +43,7 @@ function HistoryPanel() {
 
   const progress = useMemo(() => {
     if (!user || !pool) return null;
-    return nextTierProgress(user.tier, user.referralEarnPaise, pool.tiers);
+    return nextTierProgress(user.referralEarnPaise, pool.tiers);
   }, [user, pool]);
 
   const claimablePaise = useMemo(
@@ -91,7 +91,12 @@ function HistoryPanel() {
       <div className="mt-8 grid gap-3 sm:grid-cols-3">
         <div className="panel py-4">
           <p className="text-xs uppercase tracking-wider text-muted">Tier</p>
-          <p className="mt-1 font-display text-2xl">{user.tier}</p>
+          <p className="mt-1 font-display text-2xl">
+            {progress?.current.name ?? `Tier ${user.tier}`}
+          </p>
+          <p className="mt-0.5 text-xs text-muted">
+            From leftover referral earn
+          </p>
         </div>
         <div className="panel py-4">
           <p className="text-xs uppercase tracking-wider text-muted">Reinvest</p>

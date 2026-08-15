@@ -748,6 +748,18 @@ export const firebaseApi = {
       referralCodes[d.id] = mapped.referralCode;
     }
     if (!usersById[userId]) throw new Error("User not found.");
+    const snapshot = Object.fromEntries(
+      Object.entries(usersById).map(([id, u]) => [
+        id,
+        {
+          reinvestPaise: u.reinvestPaise,
+          lifetimePaise: u.lifetimePaise,
+          referralEarnPaise: u.referralEarnPaise,
+          tier: u.tier,
+          tierFeePaidPaise: u.tierFeePaidPaise,
+        },
+      ])
+    );
 
     const [pool, product, split, destinations] = await Promise.all([
       this.getPoolConfig(),
@@ -865,6 +877,19 @@ export const firebaseApi = {
         ...Object.keys(p.result.userUpdates),
       ]),
     ]);
+    for (const [id, upd] of Object.entries(ranked)) {
+      const prev = snapshot[id];
+      if (
+        !prev ||
+        prev.tier !== upd.tier ||
+        prev.referralEarnPaise !== upd.referralEarnPaise ||
+        prev.tierFeePaidPaise !== upd.tierFeePaidPaise ||
+        prev.reinvestPaise !== upd.reinvestPaise ||
+        prev.lifetimePaise !== upd.lifetimePaise
+      ) {
+        dirty.add(id);
+      }
+    }
     for (const uidKey of dirty) {
       const upd = ranked[uidKey];
       if (!upd) continue;

@@ -132,10 +132,10 @@ export default function AdminPoolSettingsPage() {
         </div>
         <div className="panel mt-4 space-y-3">
           <p className="text-sm text-muted">
-            Early members who were given a higher tier without paying the upgrade
-            fee are normalised here. Unpaid ranks drop toward Starter. Remaining
-            referral earn then pays Silver / Gold / … in order, each fee running
-            the 4-way split.
+            Early members who were given a higher tier without paying, or who
+            already paid Silver and now have leftover earn below ₹100, are
+            aligned here. The badge follows leftover referral earn. Upgrade
+            fees already taken are not charged again.
           </p>
           <button
             type="button"

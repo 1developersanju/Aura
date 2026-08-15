@@ -540,6 +540,18 @@ export const demoDb = {
         tierFeePaidPaise: a.tierFeePaidPaise,
       };
     }
+    const snapshot = Object.fromEntries(
+      Object.entries(usersById).map(([id, u]) => [
+        id,
+        {
+          reinvestPaise: u.reinvestPaise,
+          lifetimePaise: u.lifetimePaise,
+          referralEarnPaise: u.referralEarnPaise,
+          tier: u.tier,
+          tierFeePaidPaise: u.tierFeePaidPaise,
+        },
+      ])
+    );
 
     const names: Record<string, string> = {};
     for (const d of state.destinations) names[d.id] = d.name;
@@ -609,6 +621,19 @@ export const demoDb = {
         ...Object.keys(p.result.userUpdates),
       ]),
     ]);
+    for (const [id, upd] of Object.entries(ranked)) {
+      const prev = snapshot[id];
+      if (
+        !prev ||
+        prev.tier !== upd.tier ||
+        prev.referralEarnPaise !== upd.referralEarnPaise ||
+        prev.tierFeePaidPaise !== upd.tierFeePaidPaise ||
+        prev.reinvestPaise !== upd.reinvestPaise ||
+        prev.lifetimePaise !== upd.lifetimePaise
+      ) {
+        dirty.add(id);
+      }
+    }
     for (const uidKey of dirty) {
       const upd = ranked[uidKey];
       const acc = state.accounts.find((a) => a.uid === uidKey);

@@ -9,7 +9,7 @@ import { analyzeMember } from "@/lib/member-analytics";
 import { usePageRefresh } from "@/lib/page-refresh";
 import { MAX_DIRECTS } from "@/lib/placement";
 import { buildTheaterRows, setSwatch, type EmptySeat, type FilledSeat, type SetSwatch } from "@/lib/seating";
-import type { AuraUser, LedgerEntry, Voucher } from "@/lib/types";
+import { DEFAULT_TIERS } from "@/lib/pool-config";
 import {
   AdminLoading,
   EmptyState,
@@ -377,7 +377,9 @@ function MemberDrawer({
                 className="h-2.5 w-2.5 rounded-full"
                 style={{ backgroundColor: setColor.fill }}
               />
-              {setColor.name} set · tier {u.tier}
+              {setColor.name} set ·{" "}
+              {DEFAULT_TIERS.find((t) => t.tier === u.tier)?.name ?? "Starter"} ·
+              tier {u.tier}
             </p>
             <h2 className="font-display text-2xl text-foreground">{u.displayName}</h2>
             <p className="mt-0.5 text-xs text-muted">{u.email}</p>

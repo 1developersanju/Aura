@@ -12,11 +12,22 @@ export type AuraUser = {
   referredBy: string | null;
   createdAt: string;
   reinvestPaise: number;
+  /** Whole rupees ever credited to reinvest; never shrinks. */
+  reinvestLifetimePaise: number;
   lifetimePaise: number;
   tier: number;
   referralEarnPaise: number;
   /** Upgrade fees already taken from referral earn (legacy settle uses this). */
   tierFeePaidPaise: number;
+};
+
+export type HousePosition = {
+  id: string;
+  ownerUid: string;
+  index: number;
+  tag: string;
+  parentPositionId: string | null;
+  createdAt: string;
 };
 
 export type Destination = {

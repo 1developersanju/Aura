@@ -1,5 +1,6 @@
 import { MAX_DIRECTS } from "./placement";
-import type { AuraUser } from "./types";
+import { capPositionsForDisplay } from "./positions";
+import type { AuraUser, HousePosition } from "./types";
 
 export type FilledSeat = {
   kind: "filled";
@@ -8,6 +9,9 @@ export type FilledSeat = {
   parentUid: string | null;
   setId: string;
   user: AuraUser;
+  tag: string;
+  instance: number;
+  sampleCount: number;
 };
 
 export type EmptySeat = {
@@ -56,39 +60,39 @@ function setIdFor(parentUid: string | null): string {
   return parentUid ?? HOUSE_SET;
 }
 
-function byJoin(a: AuraUser, b: AuraUser): number {
-  const t = a.createdAt.localeCompare(b.createdAt);
-  return t !== 0 ? t : a.uid.localeCompare(b.uid);
-}
-
 export function seatCountForLevel(level: number): number {
   return level <= 0 ? 1 : MAX_DIRECTS ** level;
 }
 
 function parentKey(seat: TheaterSeat): string {
-  return seat.kind === "filled" ? seat.user.uid : seat.key;
+  return seat.kind === "filled" ? seat.key : seat.key;
 }
 
 function expandRow(
   current: TheaterSeat[],
-  children: Record<string, AuraUser[]>
+  children: Record<string, HousePosition[]>,
+  usersById: Record<string, AuraUser>,
+  sampleCount: Record<string, number>
 ): TheaterSeat[] {
   const next: TheaterSeat[] = [];
   for (const seat of current) {
-    const kids =
-      seat.kind === "filled" ? (children[seat.user.uid] ?? []) : [];
+    const kids = seat.kind === "filled" ? (children[seat.key] ?? []) : [];
     const setId = setIdFor(parentKey(seat));
-    const parentUid = seat.kind === "filled" ? seat.user.uid : seat.key;
+    const parentUid = seat.kind === "filled" ? seat.key : seat.key;
     for (let slot = 0; slot < MAX_DIRECTS; slot++) {
       const child = kids[slot];
-      if (child) {
+      const owner = child ? usersById[child.ownerUid] : undefined;
+      if (child && owner) {
         next.push({
           kind: "filled",
-          key: child.uid,
+          key: child.id,
           slot,
           parentUid,
           setId,
-          user: child,
+          user: owner,
+          tag: child.tag,
+          instance: child.index,
+          sampleCount: sampleCount[owner.uid] ?? child.index,
         });
       } else {
         next.push({
@@ -104,34 +108,61 @@ function expandRow(
   return next;
 }
 
-/** Always show a complete 5-wide house: level 0 = 1, 1 = 5, 2 = 25, then deeper if occupied. */
 const MIN_LEVELS = 2;
 
-export function buildTheaterRows(users: AuraUser[]): TheaterRow[] {
-  const donors = users.filter((u) => u.role !== "admin").sort(byJoin);
-  const byId: Record<string, AuraUser> = {};
-  for (const u of donors) byId[u.uid] = u;
+export function buildTheaterRows(
+  users: AuraUser[],
+  positions: HousePosition[]
+): TheaterRow[] {
+  const donors = users.filter((u) => u.role !== "admin");
+  const usersById: Record<string, AuraUser> = {};
+  for (const u of donors) usersById[u.uid] = u;
 
-  const children: Record<string, AuraUser[]> = {};
-  for (const u of donors) {
-    if (!u.referredBy || !byId[u.referredBy]) continue;
-    if (!children[u.referredBy]) children[u.referredBy] = [];
-    children[u.referredBy]!.push(u);
+  const visible = capPositionsForDisplay(positions).filter(
+    (p) => usersById[p.ownerUid]
+  );
+  const sampleCount: Record<string, number> = {};
+  for (const p of positions) {
+    if (!usersById[p.ownerUid]) continue;
+    sampleCount[p.ownerUid] = Math.max(sampleCount[p.ownerUid] ?? 0, p.index);
   }
-  for (const kids of Object.values(children)) kids.sort(byJoin);
 
-  const roots = donors.filter((u) => !u.referredBy || !byId[u.referredBy]);
+  const byId: Record<string, HousePosition> = {};
+  for (const p of visible) byId[p.id] = p;
+
+  const children: Record<string, HousePosition[]> = {};
+  for (const p of visible) {
+    if (!p.parentPositionId || !byId[p.parentPositionId]) continue;
+    if (!children[p.parentPositionId]) children[p.parentPositionId] = [];
+    children[p.parentPositionId]!.push(p);
+  }
+  for (const kids of Object.values(children)) {
+    kids.sort(
+      (a, b) =>
+        a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id)
+    );
+  }
+
+  const roots = visible.filter(
+    (p) => !p.parentPositionId || !byId[p.parentPositionId]
+  );
   if (roots.length === 0) return [];
 
   const rows: TheaterRow[] = [];
-  let current: TheaterSeat[] = roots.map((user, slot) => ({
-    kind: "filled" as const,
-    key: user.uid,
-    slot,
-    parentUid: null,
-    setId: setIdFor(null),
-    user,
-  }));
+  let current: TheaterSeat[] = roots.map((pos, slot) => {
+    const owner = usersById[pos.ownerUid]!;
+    return {
+      kind: "filled" as const,
+      key: pos.id,
+      slot,
+      parentUid: null,
+      setId: setIdFor(null),
+      user: owner,
+      tag: pos.tag,
+      instance: pos.index,
+      sampleCount: sampleCount[owner.uid] ?? pos.index,
+    };
+  });
 
   let level = 0;
   let deepestFilled = 0;
@@ -140,7 +171,7 @@ export function buildTheaterRows(users: AuraUser[]): TheaterRow[] {
     rows.push({ level, seats: current });
     if (current.some((s) => s.kind === "filled")) deepestFilled = level;
 
-    const next = expandRow(current, children);
+    const next = expandRow(current, children, usersById, sampleCount);
     const nextHasPeople = next.some((s) => s.kind === "filled");
     const floor = Math.max(MIN_LEVELS, deepestFilled);
     if (level >= floor && !nextHasPeople) break;

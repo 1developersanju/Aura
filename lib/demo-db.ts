@@ -1,4 +1,3 @@
-import { findSpilloverParent, rebuildSpilloverAssignments } from "./placement";
 import { notifyDemoAuthChanged } from "./demo-events";
 import { adminBootstrapEmail } from "./firebase";
 import { generateReferralCode, normalizeReferralCode, uid } from "./ids";
@@ -10,7 +9,14 @@ import {
 import { processEntryUnits, type EngineUser } from "./pool-engine";
 import { netVoucherDelta, runReferralTierPromotions, settleLegacyTiers } from "./tier-promote";
 import { sumPercents } from "./split";
-import { TIER_UPGRADE_REMARK, type AuraUser, type DemoAccount, type Destination, type DestinationKind, type Donation, type LedgerEntry, type PoolConfig, type ProductConfig, type ProductMode, type SplitConfig, type SystemWallet, type Voucher, type Wallet } from "./types";
+import {
+  applyReinvestSeatSpend,
+  ownersFromUsers,
+  repairHousePositions,
+  syncHousePositions,
+  walletDebitForNewSeats,
+} from "./positions";
+import { TIER_UPGRADE_REMARK, type AuraUser, type DemoAccount, type Destination, type DestinationKind, type Donation, type HousePosition, type LedgerEntry, type PoolConfig, type ProductConfig, type ProductMode, type SplitConfig, type SystemWallet, type Voucher, type Wallet } from "./types";
 
 const STORAGE_KEY = "aura_demo_v2";
 
@@ -26,6 +32,7 @@ type DemoState = {
   systemWallets: SystemWallet[];
   entries: LedgerEntry[];
   vouchers: Voucher[];
+  positions: HousePosition[];
 };
 
 function emptyState(): DemoState {
@@ -80,6 +87,7 @@ function emptyState(): DemoState {
     ],
     entries: [],
     vouchers: [],
+    positions: [],
   };
 }
 
@@ -93,6 +101,7 @@ function normalizeUser(raw: Partial<AuraUser> & { uid: string; email: string }):
     referredBy: raw.referredBy ?? null,
     createdAt: raw.createdAt ?? new Date().toISOString(),
     reinvestPaise: raw.reinvestPaise ?? 0,
+    reinvestLifetimePaise: raw.reinvestLifetimePaise ?? raw.reinvestPaise ?? 0,
     lifetimePaise: raw.lifetimePaise ?? 0,
     referralEarnPaise: raw.referralEarnPaise ?? 0,
     tierFeePaidPaise: raw.tierFeePaidPaise ?? 0,
@@ -123,6 +132,13 @@ function read(): DemoState {
       ...normalizeUser(a),
       password: a.password,
     }));
+    if (!parsed.positions) parsed.positions = [];
+    const repaired = repairHousePositions(
+      parsed.positions,
+      ownersFromUsers(parsed.accounts),
+      new Date().toISOString()
+    );
+    parsed.positions = repaired.positions;
     return parsed;
   } catch {
     const seeded = emptyState();
@@ -215,18 +231,7 @@ export const demoDb = {
     }
 
     const role = resolveRole(email);
-    // Admins stay outside the tree; donors fill the next sequential BFS slot.
-    const referredBy =
-      role === "admin"
-        ? null
-        : findSpilloverParent(
-            state.accounts.map((a) => ({
-              uid: a.uid,
-              role: a.role,
-              referredBy: a.referredBy,
-              createdAt: a.createdAt,
-            }))
-          );
+    const referredBy = null;
 
     let referralCode = generateReferralCode();
     while (state.referralIndex[referralCode]) {
@@ -247,16 +252,17 @@ export const demoDb = {
 
     state.accounts.push(account);
     state.referralIndex[referralCode] = account.uid;
-    const sequential = rebuildSpilloverAssignments(
-      state.accounts.map((a) => ({
-        uid: a.uid,
-        role: a.role,
-        referredBy: a.referredBy,
-        createdAt: a.createdAt,
-      }))
+    state.positions = syncHousePositions(
+      state.positions,
+      ownersFromUsers(state.accounts),
+      account.createdAt
     );
-    for (const a of state.accounts) {
-      a.referredBy = sequential.get(a.uid) ?? null;
+    const home = state.positions.find(
+      (p) => p.ownerUid === account.uid && p.index === 1
+    );
+    if (home?.parentPositionId) {
+      const parent = state.positions.find((p) => p.id === home.parentPositionId);
+      account.referredBy = parent?.ownerUid ?? null;
     }
     state.sessionUid = account.uid;
     write(state);
@@ -304,26 +310,36 @@ export const demoDb = {
     return stripPassword(account);
   },
 
+  async listPositions(): Promise<HousePosition[]> {
+    return [...read().positions];
+  },
+
   async rebuildSpilloverTree(): Promise<{ updated: number }> {
     const state = read();
-    const assignments = rebuildSpilloverAssignments(
-      state.accounts.map((a) => ({
-        uid: a.uid,
-        role: a.role,
-        referredBy: a.referredBy,
-        createdAt: a.createdAt,
-      }))
+    const owners = ownersFromUsers(state.accounts);
+    const { positions, updated } = repairHousePositions(
+      state.positions,
+      owners,
+      new Date().toISOString()
     );
-    let updated = 0;
+    state.positions = positions;
+    let people = 0;
     for (const account of state.accounts) {
-      const next = assignments.get(account.uid) ?? null;
+      if (account.role === "admin") continue;
+      const home = positions.find(
+        (p) => p.ownerUid === account.uid && p.index === 1
+      );
+      const parent = home?.parentPositionId
+        ? positions.find((p) => p.id === home.parentPositionId)
+        : null;
+      const next = parent?.ownerUid ?? null;
       if (account.referredBy !== next) {
         account.referredBy = next;
-        updated += 1;
+        people += 1;
       }
     }
     write(state);
-    return { updated };
+    return { updated: updated + people };
   },
 
   async listDestinations(): Promise<Destination[]> {
@@ -522,6 +538,7 @@ export const demoDb = {
         uid: a.uid,
         referredBy: a.referredBy,
         reinvestPaise: a.reinvestPaise,
+        reinvestLifetimePaise: a.reinvestLifetimePaise,
         lifetimePaise: a.lifetimePaise,
         referralEarnPaise: a.referralEarnPaise,
         tier: a.tier,
@@ -533,12 +550,19 @@ export const demoDb = {
         id,
         {
           reinvestPaise: u.reinvestPaise,
+          reinvestLifetimePaise: u.reinvestLifetimePaise,
           lifetimePaise: u.lifetimePaise,
           referralEarnPaise: u.referralEarnPaise,
           tier: u.tier,
           tierFeePaidPaise: u.tierFeePaidPaise,
         },
       ])
+    );
+
+    state.positions = syncHousePositions(
+      state.positions,
+      ownersFromUsers(state.accounts),
+      new Date().toISOString()
     );
 
     const names: Record<string, string> = {};
@@ -555,6 +579,8 @@ export const demoDb = {
       pool: state.pool,
       charityAllocations: activeAllocations,
       destinationNames: names,
+      positions: state.positions,
+      fromPositionId: `${userId}#1`,
     });
 
     for (const [uidKey, upd] of Object.entries(result.userUpdates)) {
@@ -569,9 +595,28 @@ export const demoDb = {
       pool: state.pool,
       charityAllocations: activeAllocations,
       destinationNames: names,
+      positions: state.positions,
     });
 
     const now = new Date().toISOString();
+    const startPositions = state.positions;
+    const nextPositions = syncHousePositions(
+      startPositions,
+      state.accounts.map((u) => {
+        const upd = ranked[u.uid];
+        return {
+          uid: u.uid,
+          role: u.role,
+          referralCode: u.referralCode,
+          displayName: u.displayName,
+          createdAt: u.createdAt,
+          reinvestLifetimePaise: upd?.reinvestLifetimePaise ?? u.reinvestLifetimePaise,
+        };
+      }),
+      now
+    );
+    applyReinvestSeatSpend(ranked, walletDebitForNewSeats(startPositions, nextPositions));
+
     const voucherNet = netVoucherDelta(
       [result.voucherCredits, ...promotions.map((p) => p.result.voucherCredits)],
       voucherDebits
@@ -617,6 +662,7 @@ export const demoDb = {
         prev.referralEarnPaise !== upd.referralEarnPaise ||
         prev.tierFeePaidPaise !== upd.tierFeePaidPaise ||
         prev.reinvestPaise !== upd.reinvestPaise ||
+        prev.reinvestLifetimePaise !== upd.reinvestLifetimePaise ||
         prev.lifetimePaise !== upd.lifetimePaise
       ) {
         dirty.add(id);
@@ -627,6 +673,7 @@ export const demoDb = {
       const acc = state.accounts.find((a) => a.uid === uidKey);
       if (!acc || !upd) continue;
       acc.reinvestPaise = upd.reinvestPaise;
+      acc.reinvestLifetimePaise = upd.reinvestLifetimePaise;
       acc.lifetimePaise = upd.lifetimePaise;
       acc.referralEarnPaise = upd.referralEarnPaise;
       acc.tier = upd.tier;
@@ -704,6 +751,7 @@ export const demoDb = {
     for (const promo of promotions) {
       pushEntry(promo.userId, promo.costPaise, promo.result, TIER_UPGRADE_REMARK);
     }
+    state.positions = nextPositions;
     write(state);
     notifyDemoAuthChanged();
     return entry;
@@ -774,11 +822,17 @@ export const demoDb = {
       if (a.role === "admin") continue;
       a.lifetimePaise = 0;
       a.reinvestPaise = 0;
+      a.reinvestLifetimePaise = 0;
       a.referralEarnPaise = 0;
       a.tierFeePaidPaise = 0;
       a.tier = 1;
       usersReset += 1;
     }
+    state.positions = syncHousePositions(
+      [],
+      ownersFromUsers(state.accounts),
+      now
+    );
     write(state);
     return {
       entries,
@@ -786,6 +840,33 @@ export const demoDb = {
       usersReset,
       wallets: state.systemWallets.length + state.wallets.length,
     };
+  },
+
+  async deleteAllDonors(): Promise<{ deleted: number }> {
+    const state = read();
+    const keepUid = state.sessionUid;
+    const keep = state.accounts.filter(
+      (a) => a.role === "admin" || a.uid === keepUid
+    );
+    const deleted = state.accounts.length - keep.length;
+    const keepIds = new Set(keep.map((a) => a.uid));
+    state.accounts = keep;
+    state.referralIndex = Object.fromEntries(
+      Object.entries(state.referralIndex).filter(([, uid]) => keepIds.has(uid))
+    );
+    state.entries = [];
+    state.vouchers = [];
+    state.positions = syncHousePositions(
+      [],
+      ownersFromUsers(state.accounts),
+      new Date().toISOString()
+    );
+    if (state.sessionUid && !keepIds.has(state.sessionUid)) {
+      state.sessionUid = keep[0]?.uid ?? null;
+    }
+    write(state);
+    notifyDemoAuthChanged();
+    return { deleted };
   },
 
   async settleLegacyTiers(): Promise<{
@@ -801,6 +882,7 @@ export const demoDb = {
         uid: a.uid,
         referredBy: a.referredBy,
         reinvestPaise: a.reinvestPaise,
+        reinvestLifetimePaise: a.reinvestLifetimePaise,
         lifetimePaise: a.lifetimePaise,
         referralEarnPaise: a.referralEarnPaise,
         tier: a.tier,
@@ -816,6 +898,13 @@ export const demoDb = {
       return dest?.active;
     });
 
+    const now = new Date().toISOString();
+    state.positions = syncHousePositions(
+      state.positions,
+      ownersFromUsers(state.accounts),
+      now
+    );
+
     const { promotions, voucherDebits, usersById: ranked, demoted } =
       settleLegacyTiers({
         usersById,
@@ -823,9 +912,9 @@ export const demoDb = {
         pool: state.pool,
         charityAllocations: activeAllocations,
         destinationNames: names,
+        positions: state.positions,
       });
 
-    const now = new Date().toISOString();
     const voucherNet = netVoucherDelta(
       promotions.map((p) => p.result.voucherCredits),
       voucherDebits
@@ -851,11 +940,30 @@ export const demoDb = {
       }
     }
 
+    const startPositions = state.positions;
+    const nextPositions = syncHousePositions(
+      startPositions,
+      state.accounts.map((u) => {
+        const upd = ranked[u.uid];
+        return {
+          uid: u.uid,
+          role: u.role,
+          referralCode: u.referralCode,
+          displayName: u.displayName,
+          createdAt: u.createdAt,
+          reinvestLifetimePaise: upd?.reinvestLifetimePaise ?? u.reinvestLifetimePaise,
+        };
+      }),
+      now
+    );
+    applyReinvestSeatSpend(ranked, walletDebitForNewSeats(startPositions, nextPositions));
+
     for (const id of donorIds) {
       const upd = ranked[id];
       const acc = state.accounts.find((a) => a.uid === id);
       if (!acc || !upd) continue;
       acc.reinvestPaise = upd.reinvestPaise;
+      acc.reinvestLifetimePaise = upd.reinvestLifetimePaise;
       acc.lifetimePaise = upd.lifetimePaise;
       acc.referralEarnPaise = upd.referralEarnPaise;
       acc.tier = upd.tier;
@@ -903,6 +1011,7 @@ export const demoDb = {
     bumpSystem(state, "ops", opsDelta, now);
     bumpSystem(state, "charity", charityDelta, now);
     bumpSystem(state, "dust", dustDelta, now);
+    state.positions = nextPositions;
     write(state);
     notifyDemoAuthChanged();
     return {

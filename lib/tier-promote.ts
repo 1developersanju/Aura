@@ -1,5 +1,6 @@
 import { processEntryUnits, type EngineUser, type ProcessEntryResult } from "./pool-engine";
-import type { PoolConfig, SplitAllocation } from "./types";
+import { homePositionId } from "./positions";
+import type { HousePosition, PoolConfig, SplitAllocation } from "./types";
 
 export type RankedUser = EngineUser & { tier: number };
 
@@ -48,6 +49,7 @@ export function runReferralTierPromotions(input: {
   pool: PoolConfig;
   charityAllocations: SplitAllocation[];
   destinationNames: Record<string, string>;
+  positions?: HousePosition[];
   maxPromotions?: number;
 }): {
   usersById: Record<string, RankedUser>;
@@ -81,6 +83,8 @@ export function runReferralTierPromotions(input: {
         pool: input.pool,
         charityAllocations: input.charityAllocations,
         destinationNames: input.destinationNames,
+        positions: input.positions,
+        fromPositionId: homePositionId(userId),
       });
       mergeUpdates(usersById, result.userUpdates);
       usersById[userId]!.tierFeePaidPaise += next.minPaise;
@@ -153,6 +157,7 @@ export function settleLegacyTiers(input: {
   pool: PoolConfig;
   charityAllocations: SplitAllocation[];
   destinationNames: Record<string, string>;
+  positions?: HousePosition[];
 }): {
   usersById: Record<string, RankedUser>;
   promotions: TierPromotion[];
@@ -174,6 +179,7 @@ export function settleLegacyTiers(input: {
     pool: input.pool,
     charityAllocations: input.charityAllocations,
     destinationNames: input.destinationNames,
+    positions: input.positions,
     maxPromotions: 500,
   });
 

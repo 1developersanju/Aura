@@ -23,6 +23,8 @@ export default function AdminSettingsPage() {
   const [resetting, setResetting] = useState(false);
   const [resettingDb, setResettingDb] = useState(false);
   const [resetConfirm, setResetConfirm] = useState("");
+  const [deletingUsers, setDeletingUsers] = useState(false);
+  const [deleteUsersConfirm, setDeleteUsersConfirm] = useState("");
 
   useEffect(() => {
     refresh();
@@ -81,6 +83,33 @@ export default function AdminSettingsPage() {
       setError(err instanceof Error ? err.message : "Reset failed");
     } finally {
       setResetting(false);
+    }
+  }
+
+  async function deleteAllUsers() {
+    if (deleteUsersConfirm.trim().toUpperCase() !== "DELETE") {
+      setError("Type DELETE to confirm removing all members.");
+      return;
+    }
+    if (
+      !window.confirm(
+        "Delete every donor account, their house chairs, ledger, and vouchers? Admin logins stay. Firebase Auth emails may still exist and will recreate a blank profile if they sign in again."
+      )
+    ) {
+      return;
+    }
+    setDeletingUsers(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const { deleted } = await getApi().deleteAllDonors();
+      setDeleteUsersConfirm("");
+      setMessage(`Deleted ${deleted} member(s). Admin accounts were kept.`);
+      await refreshUser();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Delete users failed");
+    } finally {
+      setDeletingUsers(false);
     }
   }
 
@@ -224,11 +253,51 @@ export default function AdminSettingsPage() {
             disabled={
               resettingDb ||
               resetting ||
+              deletingUsers ||
               resetConfirm.trim().toUpperCase() !== "RESET"
             }
             onClick={resetDatabase}
           >
             {resettingDb ? "Resetting database…" : "Reset database"}
+          </button>
+        </div>
+      </Section>
+
+      <Section
+        title="Delete all members"
+        description="Removes every donor profile, house chairs, ledger, and vouchers. Admin accounts stay."
+      >
+        <div className="panel space-y-4 ring-1 ring-red-500/25">
+          <p className="text-sm text-muted">
+            Firebase Auth emails are not deleted from Google (client apps cannot).
+            If someone signs in again they get a fresh empty profile.
+          </p>
+          <label className="block max-w-sm space-y-1.5 text-sm">
+            <span className="text-muted">
+              Type <span className="font-medium text-foreground">DELETE</span> to
+              enable
+            </span>
+            <input
+              className="input"
+              value={deleteUsersConfirm}
+              onChange={(e) => setDeleteUsersConfirm(e.target.value)}
+              placeholder="DELETE"
+              autoComplete="off"
+              spellCheck={false}
+            />
+          </label>
+          <button
+            type="button"
+            className="btn-ghost text-sm text-red-200 ring-red-500/40 hover:bg-red-500/10 hover:text-red-100 disabled:opacity-40"
+            disabled={
+              deletingUsers ||
+              resettingDb ||
+              resetting ||
+              deleteUsersConfirm.trim().toUpperCase() !== "DELETE"
+            }
+            onClick={deleteAllUsers}
+          >
+            {deletingUsers ? "Deleting members…" : "Delete all users"}
           </button>
         </div>
       </Section>

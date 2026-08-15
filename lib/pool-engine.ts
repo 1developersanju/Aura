@@ -1,10 +1,12 @@
 import type {
   CharityAllocation,
   FourWayAllocation,
+  HousePosition,
   PoolConfig,
   ReferralPayout,
   SplitAllocation,
 } from "./types";
+import { climbPositionOwners, homePositionId } from "./positions";
 
 /** Split paise by percent; last destination absorbs remainder. */
 export function splitPaiseByPercent(
@@ -56,6 +58,7 @@ export type EngineUser = {
   uid: string;
   referredBy: string | null;
   reinvestPaise: number;
+  reinvestLifetimePaise: number;
   lifetimePaise: number;
   referralEarnPaise: number;
   tier: number;
@@ -69,6 +72,8 @@ export type ProcessEntryInput = {
   pool: PoolConfig;
   charityAllocations: SplitAllocation[];
   destinationNames: Record<string, string>;
+  positions?: HousePosition[];
+  fromPositionId?: string;
 };
 
 export type ProcessEntryResult = {
@@ -78,7 +83,12 @@ export type ProcessEntryResult = {
   referralPayouts: ReferralPayout[];
   userUpdates: Record<
     string,
-    { reinvestPaise: number; lifetimePaise: number; referralEarnPaise: number }
+    {
+      reinvestPaise: number;
+      reinvestLifetimePaise: number;
+      lifetimePaise: number;
+      referralEarnPaise: number;
+    }
   >;
   /** Referral earn credited as claimable voucher balance, by user. */
   voucherCredits: Record<string, number>;
@@ -86,22 +96,6 @@ export type ProcessEntryResult = {
   systemCharityDelta: number;
   systemDustDelta: number;
 };
-
-function climbUpline(
-  userId: string,
-  usersById: Record<string, EngineUser>,
-  depth: number
-): string[] {
-  const chain: string[] = [];
-  let current = usersById[userId]?.referredBy ?? null;
-  let level = 0;
-  while (current && level < depth) {
-    chain.push(current);
-    current = usersById[current]?.referredBy ?? null;
-    level += 1;
-  }
-  return chain;
-}
 
 /**
  * Process whole-rupee units through the 4-way pool protocol.
@@ -129,7 +123,11 @@ export function processEntryUnits(input: ProcessEntryInput): ProcessEntryResult 
   const referralPayouts: ReferralPayout[] = [];
   const earnDelta: Record<string, number> = {};
 
-  const upline = climbUpline(userId, usersById, pool.referralDepth);
+  const upline = climbPositionOwners(
+    input.fromPositionId ?? homePositionId(userId),
+    input.positions ?? [],
+    pool.referralDepth
+  );
   const { shares, dust: dustPaise } = equalSplitPaise(
     referralPaise,
     upline.length
@@ -153,6 +151,7 @@ export function processEntryUnits(input: ProcessEntryInput): ProcessEntryResult 
   const userUpdates: ProcessEntryResult["userUpdates"] = {
     [userId]: {
       reinvestPaise: actor.reinvestPaise + reinvestPaise,
+      reinvestLifetimePaise: actor.reinvestLifetimePaise + reinvestPaise,
       lifetimePaise: actor.lifetimePaise + amountPaise,
       referralEarnPaise: actor.referralEarnPaise,
     },
@@ -164,6 +163,7 @@ export function processEntryUnits(input: ProcessEntryInput): ProcessEntryResult 
     const existing = userUpdates[uid];
     userUpdates[uid] = {
       reinvestPaise: existing?.reinvestPaise ?? u.reinvestPaise,
+      reinvestLifetimePaise: existing?.reinvestLifetimePaise ?? u.reinvestLifetimePaise,
       lifetimePaise: existing?.lifetimePaise ?? u.lifetimePaise,
       referralEarnPaise: (existing?.referralEarnPaise ?? u.referralEarnPaise) + delta,
     };

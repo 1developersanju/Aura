@@ -22,6 +22,14 @@ import {
   type Timestamp,
 } from "firebase/firestore";
 import { findSpilloverParent, rebuildSpilloverAssignments } from "./placement";
+import {
+  applyReinvestSeatSpend,
+  ownersFromUsers,
+  positionDocId,
+  repairHousePositions,
+  syncHousePositions,
+  walletDebitForNewSeats,
+} from "./positions";
 import { adminBootstrapEmail, getFirebaseAuth, getFirestoreDb } from "./firebase";
 import { generateReferralCode, normalizeReferralCode } from "./ids";
 import { paiseToRupees, rupeesToPaise } from "./paise";
@@ -32,7 +40,7 @@ import {
 import { processEntryUnits, type EngineUser } from "./pool-engine";
 import { netVoucherDelta, runReferralTierPromotions, settleLegacyTiers } from "./tier-promote";
 import { sumPercents } from "./split";
-import { TIER_UPGRADE_REMARK, type AuraUser, type Destination, type DestinationKind, type Donation, type LedgerEntry, type PoolConfig, type ProductConfig, type ProductMode, type SplitConfig, type SystemWallet, type SystemWalletId, type UserRole, type Voucher, type Wallet } from "./types";
+import { TIER_UPGRADE_REMARK, type AuraUser, type Destination, type DestinationKind, type Donation, type HousePosition, type LedgerEntry, type PoolConfig, type ProductConfig, type ProductMode, type SplitConfig, type SystemWallet, type SystemWalletId, type UserRole, type Voucher, type Wallet } from "./types";
 
 function tsToIso(value: Timestamp | string | undefined): string {
   if (!value) return new Date().toISOString();
@@ -50,6 +58,12 @@ function mapAuraUser(uid: string, data: Record<string, unknown>): AuraUser {
     referredBy: (data.referredBy as string | null) ?? null,
     createdAt: tsToIso(data.createdAt as Timestamp | string | undefined),
     reinvestPaise: typeof data.reinvestPaise === "number" ? data.reinvestPaise : 0,
+    reinvestLifetimePaise:
+      typeof data.reinvestLifetimePaise === "number"
+        ? data.reinvestLifetimePaise
+        : typeof data.reinvestPaise === "number"
+          ? data.reinvestPaise
+          : 0,
     lifetimePaise: typeof data.lifetimePaise === "number" ? data.lifetimePaise : 0,
     tier: typeof data.tier === "number" ? data.tier : 1,
     referralEarnPaise:
@@ -57,6 +71,60 @@ function mapAuraUser(uid: string, data: Record<string, unknown>): AuraUser {
     tierFeePaidPaise:
       typeof data.tierFeePaidPaise === "number" ? data.tierFeePaidPaise : 0,
   };
+}
+
+function mapHousePosition(
+  id: string,
+  data: Record<string, unknown>
+): HousePosition {
+  return {
+    id: String(data.id ?? id.replaceAll("__", "#")),
+    ownerUid: String(data.ownerUid ?? ""),
+    index: Number(data.index ?? 1),
+    tag: String(data.tag ?? ""),
+    parentPositionId: (data.parentPositionId as string | null) ?? null,
+    createdAt: tsToIso(data.createdAt as Timestamp | string | undefined),
+  };
+}
+
+async function loadPositions(): Promise<HousePosition[]> {
+  const snap = await getDocs(collection(getFirestoreDb()!, "positions"));
+  return snap.docs.map((d) =>
+    mapHousePosition(d.id, d.data() as Record<string, unknown>)
+  );
+}
+
+async function persistPositions(
+  next: HousePosition[],
+  prev: HousePosition[]
+): Promise<void> {
+  const db = getFirestoreDb()!;
+  const prevById = new Map(prev.map((p) => [p.id, p]));
+  const nextIds = new Set(next.map((p) => p.id));
+  const batch = writeBatch(db);
+  let ops = 0;
+  for (const p of next) {
+    const old = prevById.get(p.id);
+    if (
+      old &&
+      old.parentPositionId === p.parentPositionId &&
+      old.tag === p.tag &&
+      old.index === p.index
+    ) {
+      continue;
+    }
+    batch.set(doc(db, "positions", positionDocId(p.id)), {
+      ...p,
+      createdAt: old ? old.createdAt : p.createdAt,
+    });
+    ops += 1;
+  }
+  for (const p of prev) {
+    if (nextIds.has(p.id)) continue;
+    batch.delete(doc(db, "positions", positionDocId(p.id)));
+    ops += 1;
+  }
+  if (ops > 0) await batch.commit();
 }
 
 function entryToDonation(entry: LedgerEntry): Donation {
@@ -229,6 +297,7 @@ export async function firebaseEnsureProfile(
     referredBy,
     createdAt: new Date().toISOString(),
     reinvestPaise: 0,
+    reinvestLifetimePaise: 0,
     lifetimePaise: 0,
     tier: 1,
     referralEarnPaise: 0,
@@ -240,9 +309,24 @@ export async function firebaseEnsureProfile(
     createdAt: serverTimestamp(),
   });
   await setDoc(doc(db, "referralCodes", referralCode), { userId: user.uid });
-  const { assignments } = await applySequentialTree();
-  if (assignments.has(user.uid)) {
-    profile.referredBy = assignments.get(user.uid) ?? null;
+  const usersSnap = await getDocs(collection(db, "users"));
+  const allUsers = usersSnap.docs.map((d) =>
+    mapAuraUser(d.id, d.data() as Record<string, unknown>)
+  );
+  const prevPos = await loadPositions();
+  const synced = syncHousePositions(
+    prevPos,
+    ownersFromUsers(allUsers),
+    new Date().toISOString()
+  );
+  await persistPositions(synced, prevPos);
+  const home = synced.find((p) => p.ownerUid === user.uid && p.index === 1);
+  if (home?.parentPositionId) {
+    const parent = synced.find((p) => p.id === home.parentPositionId);
+    if (parent && profile.referredBy !== parent.ownerUid) {
+      profile.referredBy = parent.ownerUid;
+      await updateDoc(ref, { referredBy: parent.ownerUid });
+    }
   }
   clearPendingReferral();
   return profile;
@@ -421,8 +505,46 @@ export const firebaseApi = {
   },
 
   async rebuildSpilloverTree(): Promise<{ updated: number }> {
-    const { updated } = await applySequentialTree();
-    return { updated };
+    const db = getFirestoreDb()!;
+    const users = (await this.listUsers()).filter((u) => u.role !== "admin");
+    const prev = await loadPositions();
+    const { positions, updated } = repairHousePositions(
+      prev,
+      ownersFromUsers(users),
+      new Date().toISOString()
+    );
+    await persistPositions(positions, prev);
+    const homeParent = new Map<string, string | null>();
+    for (const p of positions) {
+      if (p.index !== 1) continue;
+      const parent = p.parentPositionId
+        ? positions.find((x) => x.id === p.parentPositionId)
+        : null;
+      homeParent.set(p.ownerUid, parent?.ownerUid ?? null);
+    }
+    const batch = writeBatch(db);
+    let people = 0;
+    for (const u of users) {
+      const next = homeParent.get(u.uid) ?? null;
+      if (u.referredBy !== next) {
+        batch.update(doc(db, "users", u.uid), { referredBy: next });
+        people += 1;
+      }
+    }
+    if (people > 0) await batch.commit();
+    return { updated: updated + people };
+  },
+
+  async listPositions(): Promise<HousePosition[]> {
+    const prev = await loadPositions();
+    const users = await this.listUsers();
+    const { positions } = repairHousePositions(
+      prev,
+      ownersFromUsers(users),
+      new Date().toISOString()
+    );
+    await persistPositions(positions, prev);
+    return positions;
   },
 
   async listDestinations(): Promise<Destination[]> {
@@ -718,14 +840,17 @@ export const firebaseApi = {
     const amountPaise = rupeesToPaise(amountRupees);
 
     const usersSnap = await getDocs(collection(db, "users"));
+    const auraUsers: AuraUser[] = [];
     const usersById: Record<string, EngineUser> = {};
     const referralCodes: Record<string, string> = {};
     for (const d of usersSnap.docs) {
       const mapped = mapAuraUser(d.id, d.data() as Record<string, unknown>);
+      auraUsers.push(mapped);
       usersById[d.id] = {
         uid: mapped.uid,
         referredBy: mapped.referredBy,
         reinvestPaise: mapped.reinvestPaise,
+        reinvestLifetimePaise: mapped.reinvestLifetimePaise,
         lifetimePaise: mapped.lifetimePaise,
         referralEarnPaise: mapped.referralEarnPaise,
         tier: mapped.tier,
@@ -739,12 +864,20 @@ export const firebaseApi = {
         id,
         {
           reinvestPaise: u.reinvestPaise,
+          reinvestLifetimePaise: u.reinvestLifetimePaise,
           lifetimePaise: u.lifetimePaise,
           referralEarnPaise: u.referralEarnPaise,
           tier: u.tier,
           tierFeePaidPaise: u.tierFeePaidPaise,
         },
       ])
+    );
+
+    const prevPositions = await loadPositions();
+    const startPositions = syncHousePositions(
+      prevPositions,
+      ownersFromUsers(auraUsers),
+      new Date().toISOString()
     );
 
     const [pool, product, split, destinations] = await Promise.all([
@@ -768,6 +901,8 @@ export const firebaseApi = {
       pool,
       charityAllocations: activeAllocations,
       destinationNames: names,
+      positions: startPositions,
+      fromPositionId: `${userId}#1`,
     });
 
     for (const [uidKey, upd] of Object.entries(result.userUpdates)) {
@@ -782,6 +917,7 @@ export const firebaseApi = {
       pool,
       charityAllocations: activeAllocations,
       destinationNames: names,
+      positions: startPositions,
     });
 
     const voucherNet = netVoucherDelta(
@@ -858,6 +994,24 @@ export const firebaseApi = {
       );
     }
 
+    const ownersAfter = auraUsers.map((u) => {
+      const upd = ranked[u.uid];
+      return {
+        uid: u.uid,
+        role: u.role,
+        referralCode: u.referralCode,
+        displayName: u.displayName,
+        createdAt: u.createdAt,
+        reinvestLifetimePaise: upd?.reinvestLifetimePaise ?? u.reinvestLifetimePaise,
+      };
+    });
+    const nextPositions = syncHousePositions(
+      startPositions,
+      ownersAfter,
+      nowIso
+    );
+    applyReinvestSeatSpend(ranked, walletDebitForNewSeats(startPositions, nextPositions));
+
     const dirty = new Set<string>([
       userId,
       ...Object.keys(result.userUpdates),
@@ -874,6 +1028,7 @@ export const firebaseApi = {
         prev.referralEarnPaise !== upd.referralEarnPaise ||
         prev.tierFeePaidPaise !== upd.tierFeePaidPaise ||
         prev.reinvestPaise !== upd.reinvestPaise ||
+        prev.reinvestLifetimePaise !== upd.reinvestLifetimePaise ||
         prev.lifetimePaise !== upd.lifetimePaise
       ) {
         dirty.add(id);
@@ -884,6 +1039,7 @@ export const firebaseApi = {
       if (!upd) continue;
       batch.update(doc(db, "users", uidKey), {
         reinvestPaise: upd.reinvestPaise,
+        reinvestLifetimePaise: upd.reinvestLifetimePaise,
         lifetimePaise: upd.lifetimePaise,
         referralEarnPaise: upd.referralEarnPaise,
         tier: upd.tier,
@@ -940,6 +1096,8 @@ export const firebaseApi = {
     }
 
     await batch.commit();
+
+    await persistPositions(nextPositions, prevPositions);
 
     return {
       id: entryRef.id,
@@ -1076,11 +1234,27 @@ export const firebaseApi = {
         batch.update(ref, {
           lifetimePaise: 0,
           reinvestPaise: 0,
+          reinvestLifetimePaise: 0,
           referralEarnPaise: 0,
           tierFeePaidPaise: 0,
           tier: 1,
         })
     );
+
+    const posSnap = await getDocs(collection(db, "positions"));
+    await commitInChunks(
+      posSnap.docs.map((d) => d.ref),
+      (batch, ref) => batch.delete(ref)
+    );
+    const resetUsers = usersSnap.docs.map((d) =>
+      mapAuraUser(d.id, {
+        ...(d.data() as Record<string, unknown>),
+        reinvestLifetimePaise: 0,
+        reinvestPaise: 0,
+      })
+    );
+    const homes = syncHousePositions([], ownersFromUsers(resetUsers), new Date().toISOString());
+    await persistPositions(homes, []);
 
     return {
       entries: entriesSnap.size,
@@ -1090,6 +1264,73 @@ export const firebaseApi = {
     };
   },
 
+  async deleteAllDonors(): Promise<{ deleted: number }> {
+    const db = getFirestoreDb()!;
+    const keepUid = getFirebaseAuth()?.currentUser?.uid ?? null;
+
+    async function commitInChunks(
+      refs: ReturnType<typeof doc>[],
+      apply: (batch: ReturnType<typeof writeBatch>, ref: ReturnType<typeof doc>) => void
+    ) {
+      const CHUNK = 400;
+      for (let i = 0; i < refs.length; i += CHUNK) {
+        const batch = writeBatch(db);
+        for (const ref of refs.slice(i, i + CHUNK)) apply(batch, ref);
+        await batch.commit();
+      }
+    }
+
+    const [usersSnap, codesSnap, posSnap, entriesSnap, vouchersSnap] =
+      await Promise.all([
+        getDocs(collection(db, "users")),
+        getDocs(collection(db, "referralCodes")),
+        getDocs(collection(db, "positions")),
+        getDocs(collection(db, "entries")),
+        getDocs(collection(db, "vouchers")),
+      ]);
+
+    const donors = usersSnap.docs.filter((d) => {
+      if (keepUid && d.id === keepUid) return false;
+      const role = (d.data().role as string) ?? "donor";
+      return role !== "admin";
+    });
+    const donorIds = new Set(donors.map((d) => d.id));
+
+    await commitInChunks(
+      donors.map((d) => d.ref),
+      (batch, ref) => batch.delete(ref)
+    );
+    await commitInChunks(
+      codesSnap.docs
+        .filter((d) => donorIds.has(String(d.data().userId ?? "")))
+        .map((d) => d.ref),
+      (batch, ref) => batch.delete(ref)
+    );
+    await commitInChunks(
+      posSnap.docs.map((d) => d.ref),
+      (batch, ref) => batch.delete(ref)
+    );
+    await commitInChunks(
+      entriesSnap.docs.map((d) => d.ref),
+      (batch, ref) => batch.delete(ref)
+    );
+    await commitInChunks(
+      vouchersSnap.docs.map((d) => d.ref),
+      (batch, ref) => batch.delete(ref)
+    );
+
+    const remaining = (await getDocs(collection(db, "users"))).docs.map((d) =>
+      mapAuraUser(d.id, d.data() as Record<string, unknown>)
+    );
+    const homes = syncHousePositions(
+      [],
+      ownersFromUsers(remaining),
+      new Date().toISOString()
+    );
+    await persistPositions(homes, []);
+    return { deleted: donors.length };
+  },
+
   async settleLegacyTiers(): Promise<{
     demoted: number;
     charged: number;
@@ -1097,15 +1338,18 @@ export const firebaseApi = {
   }> {
     const db = getFirestoreDb()!;
     const usersSnap = await getDocs(collection(db, "users"));
+    const auraUsers: AuraUser[] = [];
     const usersById: Record<string, EngineUser> = {};
     const referralCodes: Record<string, string> = {};
     const donorIds: string[] = [];
     for (const d of usersSnap.docs) {
       const mapped = mapAuraUser(d.id, d.data() as Record<string, unknown>);
+      auraUsers.push(mapped);
       usersById[d.id] = {
         uid: mapped.uid,
         referredBy: mapped.referredBy,
         reinvestPaise: mapped.reinvestPaise,
+        reinvestLifetimePaise: mapped.reinvestLifetimePaise,
         lifetimePaise: mapped.lifetimePaise,
         referralEarnPaise: mapped.referralEarnPaise,
         tier: mapped.tier,
@@ -1114,6 +1358,13 @@ export const firebaseApi = {
       referralCodes[d.id] = mapped.referralCode;
       if (mapped.role !== "admin") donorIds.push(d.id);
     }
+
+    const prevPositions = await loadPositions();
+    const startPositions = syncHousePositions(
+      prevPositions,
+      ownersFromUsers(auraUsers),
+      new Date().toISOString()
+    );
 
     const [pool, product, split, destinations] = await Promise.all([
       this.getPoolConfig(),
@@ -1135,6 +1386,7 @@ export const firebaseApi = {
         pool,
         charityAllocations: activeAllocations,
         destinationNames: names,
+        positions: startPositions,
       });
 
     const voucherNet = netVoucherDelta(
@@ -1184,11 +1436,30 @@ export const firebaseApi = {
       });
     }
 
+    const ownersAfter = auraUsers.map((u) => {
+      const upd = ranked[u.uid];
+      return {
+        uid: u.uid,
+        role: u.role,
+        referralCode: u.referralCode,
+        displayName: u.displayName,
+        createdAt: u.createdAt,
+        reinvestLifetimePaise: upd?.reinvestLifetimePaise ?? u.reinvestLifetimePaise,
+      };
+    });
+    const nextPositions = syncHousePositions(
+      startPositions,
+      ownersAfter,
+      new Date().toISOString()
+    );
+    applyReinvestSeatSpend(ranked, walletDebitForNewSeats(startPositions, nextPositions));
+
     for (const id of donorIds) {
       const upd = ranked[id];
       if (!upd) continue;
       batch.update(doc(db, "users", id), {
         reinvestPaise: upd.reinvestPaise,
+        reinvestLifetimePaise: upd.reinvestLifetimePaise,
         lifetimePaise: upd.lifetimePaise,
         referralEarnPaise: upd.referralEarnPaise,
         tier: upd.tier,
@@ -1240,6 +1511,8 @@ export const firebaseApi = {
     if (promotions.length > 0 || demoted > 0 || donorIds.length > 0) {
       await batch.commit();
     }
+
+    await persistPositions(nextPositions, prevPositions);
 
     return {
       demoted,

@@ -7,6 +7,7 @@ import type {
   Destination,
   DestinationKind,
   Donation,
+  HousePosition,
   LedgerEntry,
   PoolConfig,
   ProductConfig,
@@ -37,6 +38,7 @@ type Api = {
   listUsers(): Promise<AuraUser[]>;
   promoteAdmin(email: string): Promise<AuraUser>;
   rebuildSpilloverTree(): Promise<{ updated: number }>;
+  listPositions(): Promise<HousePosition[]>;
   settleLegacyTiers(): Promise<{
     demoted: number;
     charged: number;
@@ -81,6 +83,7 @@ type Api = {
     usersReset: number;
     wallets: number;
   }>;
+  deleteAllDonors(): Promise<{ deleted: number }>;
 };
 
 export function getApi(): Api {

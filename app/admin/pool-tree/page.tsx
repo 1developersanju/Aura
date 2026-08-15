@@ -10,7 +10,7 @@ import { usePageRefresh } from "@/lib/page-refresh";
 import { MAX_DIRECTS } from "@/lib/placement";
 import { buildTheaterRows, setSwatch, type EmptySeat, type FilledSeat, type SetSwatch } from "@/lib/seating";
 import { DEFAULT_TIERS } from "@/lib/pool-config";
-import type { AuraUser, LedgerEntry, Voucher } from "@/lib/types";
+import type { AuraUser, HousePosition, LedgerEntry, Voucher } from "@/lib/types";
 import {
   AdminLoading,
   EmptyState,
@@ -21,6 +21,7 @@ import {
 
 export default function AdminPoolTreePage() {
   const [users, setUsers] = useState<AuraUser[]>([]);
+  const [positions, setPositions] = useState<HousePosition[]>([]);
   const [entries, setEntries] = useState<LedgerEntry[]>([]);
   const [vouchers, setVouchers] = useState<Voucher[]>([]);
   const [loading, setLoading] = useState(true);
@@ -34,14 +35,16 @@ export default function AdminPoolTreePage() {
 
   const load = useCallback(async () => {
     const api = getApi();
-    const [u, e, v] = await Promise.all([
+    const [u, e, v, p] = await Promise.all([
       api.listUsers(),
       api.listEntries(),
       api.listAllVouchers(),
+      api.listPositions(),
     ]);
     setUsers(u);
     setEntries(e);
     setVouchers(v);
+    setPositions(p);
     setLoading(false);
   }, []);
 
@@ -53,8 +56,20 @@ export default function AdminPoolTreePage() {
     return map;
   }, [users]);
 
-  const rows = useMemo(() => buildTheaterRows(users), [users]);
-  const selected = selectedId ? byId[selectedId] : null;
+  const rows = useMemo(
+    () => buildTheaterRows(users, positions),
+    [users, positions]
+  );
+  const selectedSeat = useMemo(() => {
+    if (!selectedId) return null;
+    for (const row of rows) {
+      for (const s of row.seats) {
+        if (s.kind === "filled" && s.key === selectedId) return s;
+      }
+    }
+    return null;
+  }, [rows, selectedId]);
+  const selected = selectedSeat?.user ?? null;
   const analytics = useMemo(() => {
     if (!selected) return null;
     return analyzeMember(selected, users, entries, vouchers);
@@ -69,8 +84,8 @@ export default function AdminPoolTreePage() {
       setMessageTone("success");
       setMessage(
         updated === 0
-          ? "House already matched sequential seating."
-          : `Reseated ${updated} member(s) in join order.`
+          ? "House already in people-first order with extra samples at the end."
+          : `Fixed ${updated} chair(s): members first, then extra samples.`
       );
     } catch (err) {
       setMessageTone("error");
@@ -115,7 +130,7 @@ export default function AdminPoolTreePage() {
             <p className="mt-2 text-[10px] uppercase tracking-[0.28em] text-accent">
               Stage
             </p>
-            <SetLegend rows={rows} byId={byId} />
+            <SetLegend rows={rows} />
           </div>
 
           <div className="space-y-7">
@@ -140,10 +155,10 @@ export default function AdminPoolTreePage() {
                         <FilledChair
                           key={seat.key}
                           seat={seat}
-                          selected={selectedId === seat.user.uid}
+                          selected={selectedId === seat.key}
                           onSelect={() => {
                             setEmptyHint(null);
-                            setSelectedId(seat.user.uid);
+                            setSelectedId(seat.key);
                           }}
                         />
                       ) : (
@@ -170,7 +185,8 @@ export default function AdminPoolTreePage() {
           Open seat {emptyHint.slot + 1} under{" "}
           <strong>
             {emptyHint.parentUid
-              ? byId[emptyHint.parentUid]?.displayName ?? "an open chair above"
+              ? positions.find((p) => p.id === emptyHint.parentUid)?.tag ??
+                "an open chair above"
               : "the house"}
           </strong>
           . Next joiner in sequence takes the leftmost open chair.
@@ -181,12 +197,15 @@ export default function AdminPoolTreePage() {
         {analytics && (
           <MemberDrawer
             analytics={analytics}
-            setColor={setSwatch(analytics.user.referredBy ?? "house-root")}
+            setColor={setSwatch(selectedSeat?.setId ?? "house-root")}
             sponsorName={
               analytics.user.referredBy
                 ? byId[analytics.user.referredBy]?.displayName
                 : null
             }
+            sampleTag={selectedSeat?.tag}
+            sampleIndex={selectedSeat?.instance}
+            sampleCount={selectedSeat?.sampleCount}
             onClose={() => setSelectedId(null)}
           />
         )}
@@ -211,8 +230,8 @@ function FilledChair({
     <button
       type="button"
       onClick={onSelect}
-      title={`${u.displayName} · ${swatch.name} set · ${u.email}`}
-      className={`group w-[3.35rem] shrink-0 text-center sm:w-16 ${
+      title={`${u.displayName} · ${seat.tag} · ${u.email}`}
+      className={`group w-[4.4rem] shrink-0 text-center sm:w-[4.75rem] ${
         selected ? "z-10" : ""
       } ${seat.slot === 0 ? "ml-2 sm:ml-3" : ""}`}
     >
@@ -236,7 +255,7 @@ function FilledChair({
         className="mt-1 block truncate text-[9px]"
         style={{ color: selected ? swatch.fill : undefined }}
       >
-        {u.displayName}
+        {seat.tag}
       </span>
     </button>
   );
@@ -279,30 +298,31 @@ function EmptyChair({
 
 function SetLegend({
   rows,
-  byId,
 }: {
   rows: ReturnType<typeof buildTheaterRows>;
-  byId: Record<string, AuraUser>;
 }) {
   const items = useMemo(() => {
     const seen = new Map<string, { setId: string; label: string }>();
     for (const row of rows) {
       for (const seat of row.seats) {
         if (seen.has(seat.setId)) continue;
-        const parentName = seat.parentUid
-          ? byId[seat.parentUid]?.displayName
-          : null;
+        const parentPos = rows
+          .flatMap((r) => r.seats)
+          .find(
+            (s): s is FilledSeat =>
+              s.kind === "filled" && s.key === seat.parentUid
+          );
         const label =
           seat.setId === "house-root"
             ? "Front row"
-            : parentName
-              ? `${parentName}’s set`
+            : parentPos
+              ? `${parentPos.tag}’s set`
               : "Open set";
         seen.set(seat.setId, { setId: seat.setId, label });
       }
     }
     return [...seen.values()];
-  }, [rows, byId]);
+  }, [rows]);
 
   if (items.length === 0) return null;
 
@@ -331,11 +351,17 @@ function MemberDrawer({
   analytics,
   sponsorName,
   setColor,
+  sampleTag,
+  sampleIndex,
+  sampleCount,
   onClose,
 }: {
   analytics: NonNullable<ReturnType<typeof analyzeMember>>;
   sponsorName: string | null | undefined;
   setColor: SetSwatch;
+  sampleTag?: string;
+  sampleIndex?: number;
+  sampleCount?: number;
   onClose: () => void;
 }) {
   const u = analytics.user;
@@ -384,6 +410,11 @@ function MemberDrawer({
             </p>
             <h2 className="font-display text-2xl text-foreground">{u.displayName}</h2>
             <p className="mt-0.5 text-xs text-muted">{u.email}</p>
+            {sampleTag && (
+              <p className="mt-1 text-xs text-accent">
+                Sample {sampleIndex} of {sampleCount} · {sampleTag}
+              </p>
+            )}
             {sponsorName && (
               <p className="mt-1 text-xs text-muted">Under {sponsorName}</p>
             )}

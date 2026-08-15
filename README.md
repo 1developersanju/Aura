@@ -1,36 +1,39 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Aura
 
-## Getting Started
+Blind personal donation app: donors give to **Aura**; Aura admin allocates demo funds across purpose wallets and partner charities.
 
-First, run the development server:
+## Quick start
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+With `.env.local` Firebase keys present, the nav shows **Live**. Without them, it runs in browser **Demo** mode (localStorage).
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+### Admin bootstrap
 
-## Learn More
+Go to **`/admin/login`** (not the donor login). Create an admin with email `admin@aura.demo` (or your `NEXT_PUBLIC_AURA_ADMIN_EMAIL`), or promote a user later under `/admin/settings`.
 
-To learn more about Next.js, take a look at the following resources:
+Donors use **`/login`** and **`/signup`**. Admin accounts are rejected on the donor portal and vice versa.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Firebase console checklist
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+For project `fooddb-53cd7` (or your own):
 
-## Deploy on Vercel
+1. **Authentication → Sign-in method** → enable **Email/Password**
+2. **Firestore Database** → create database (start in test mode, then paste [`firestore.rules`](firestore.rules))
+3. Restart `npm run dev` after editing `.env.local`
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+On first signed-in session the app seeds Education / Food relief / Partner Charity with a 40/35/25 split if destinations are empty.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Routes
+
+| Path | Role |
+|------|------|
+| `/`, `/donate`, `/donations`, `/invite` | Donor |
+| `/login`, `/signup` | Auth (`?ref=CODE` on signup) |
+| `/admin/*` | Aura admin only |
+# Aura

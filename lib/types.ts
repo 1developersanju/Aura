@@ -119,6 +119,8 @@ export type FourWayAllocation = {
   dustPaise: number;
 };
 
+export const TIER_UPGRADE_REMARK = "Tier upgrade deduction";
+
 export type LedgerEntry = {
   id: string;
   userId: string;
@@ -131,6 +133,7 @@ export type LedgerEntry = {
   referralPayouts: ReferralPayout[];
   charitySplitVersion: number;
   vouchersSpawned: string[];
+  remarks: string | null;
 };
 
 export type Voucher = {

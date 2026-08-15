@@ -10,21 +10,7 @@ import {
 import { processEntryUnits, type EngineUser } from "./pool-engine";
 import { netVoucherDelta, runReferralTierPromotions, settleLegacyTiers } from "./tier-promote";
 import { sumPercents } from "./split";
-import type {
-  AuraUser,
-  DemoAccount,
-  Destination,
-  DestinationKind,
-  Donation,
-  LedgerEntry,
-  PoolConfig,
-  ProductConfig,
-  ProductMode,
-  SplitConfig,
-  SystemWallet,
-  Voucher,
-  Wallet,
-} from "./types";
+import { TIER_UPGRADE_REMARK, type AuraUser, type DemoAccount, type Destination, type DestinationKind, type Donation, type LedgerEntry, type PoolConfig, type ProductConfig, type ProductMode, type SplitConfig, type SystemWallet, type Voucher, type Wallet } from "./types";
 
 const STORAGE_KEY = "aura_demo_v2";
 
@@ -129,8 +115,10 @@ function read(): DemoState {
     if (!parsed.systemWallets) {
       parsed.systemWallets = emptyState().systemWallets;
     }
-    if (!parsed.entries) parsed.entries = [];
-    if (!parsed.vouchers) parsed.vouchers = [];
+    parsed.entries = parsed.entries.map((e) => ({
+      ...e,
+      remarks: e.remarks ?? null,
+    }));
     parsed.accounts = parsed.accounts.map((a) => ({
       ...normalizeUser(a),
       password: a.password,
@@ -688,7 +676,12 @@ export const demoDb = {
       wallet.updatedAt = now;
     }
 
-    function pushEntry(actorId: string, amount: number, proc: typeof result) {
+    function pushEntry(
+      actorId: string,
+      amount: number,
+      proc: typeof result,
+      remarks: string | null
+    ) {
       const entry: LedgerEntry = {
         id: uid(),
         userId: actorId,
@@ -701,14 +694,15 @@ export const demoDb = {
         referralPayouts: proc.referralPayouts,
         charitySplitVersion: state.split.version,
         vouchersSpawned: voucherIds,
+        remarks,
       };
       state.entries.unshift(entry);
       return entry;
     }
 
-    const entry = pushEntry(userId, amountPaise, result);
+    const entry = pushEntry(userId, amountPaise, result, null);
     for (const promo of promotions) {
-      pushEntry(promo.userId, promo.costPaise, promo.result);
+      pushEntry(promo.userId, promo.costPaise, promo.result, TIER_UPGRADE_REMARK);
     }
     write(state);
     notifyDemoAuthChanged();
@@ -887,6 +881,7 @@ export const demoDb = {
         referralPayouts: promo.result.referralPayouts,
         charitySplitVersion: state.split.version,
         vouchersSpawned: [],
+        remarks: TIER_UPGRADE_REMARK,
       };
       state.entries.unshift(entry);
       for (const alloc of promo.result.charityAllocations) {

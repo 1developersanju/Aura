@@ -32,22 +32,7 @@ import {
 import { processEntryUnits, type EngineUser } from "./pool-engine";
 import { netVoucherDelta, runReferralTierPromotions, settleLegacyTiers } from "./tier-promote";
 import { sumPercents } from "./split";
-import type {
-  AuraUser,
-  Destination,
-  DestinationKind,
-  Donation,
-  LedgerEntry,
-  PoolConfig,
-  ProductConfig,
-  ProductMode,
-  SplitConfig,
-  SystemWallet,
-  SystemWalletId,
-  UserRole,
-  Voucher,
-  Wallet,
-} from "./types";
+import { TIER_UPGRADE_REMARK, type AuraUser, type Destination, type DestinationKind, type Donation, type LedgerEntry, type PoolConfig, type ProductConfig, type ProductMode, type SplitConfig, type SystemWallet, type SystemWalletId, type UserRole, type Voucher, type Wallet } from "./types";
 
 function tsToIso(value: Timestamp | string | undefined): string {
   if (!value) return new Date().toISOString();
@@ -104,6 +89,7 @@ function mapLedgerEntry(id: string, data: Record<string, unknown>): LedgerEntry 
     referralPayouts: (data.referralPayouts ?? []) as LedgerEntry["referralPayouts"],
     charitySplitVersion: Number(data.charitySplitVersion ?? 0),
     vouchersSpawned: (data.vouchersSpawned ?? []) as string[],
+    remarks: typeof data.remarks === "string" ? data.remarks : null,
   };
 }
 
@@ -843,7 +829,8 @@ export const firebaseApi = {
       ref: ReturnType<typeof doc>,
       actorId: string,
       amount: number,
-      proc: typeof result
+      proc: typeof result,
+      remarks: string | null
     ) {
       batch.set(ref, {
         userId: actorId,
@@ -856,16 +843,18 @@ export const firebaseApi = {
         referralPayouts: proc.referralPayouts,
         charitySplitVersion: split.version,
         vouchersSpawned: voucherIds,
+        remarks,
       });
     }
 
-    writeProcessResult(entryRef, userId, amountPaise, result);
+    writeProcessResult(entryRef, userId, amountPaise, result, null);
     for (const promo of promotions) {
       writeProcessResult(
         doc(collection(db, "entries")),
         promo.userId,
         promo.costPaise,
-        promo.result
+        promo.result,
+        TIER_UPGRADE_REMARK
       );
     }
 
@@ -964,6 +953,7 @@ export const firebaseApi = {
       referralPayouts: result.referralPayouts,
       charitySplitVersion: split.version,
       vouchersSpawned: voucherIds,
+      remarks: null,
     };
   },
 
@@ -1190,6 +1180,7 @@ export const firebaseApi = {
         referralPayouts: promo.result.referralPayouts,
         charitySplitVersion: split.version,
         vouchersSpawned: [],
+        remarks: TIER_UPGRADE_REMARK,
       });
     }
 

@@ -70,6 +70,9 @@ export default function AdminLedgerPage() {
                         from {donor?.displayName ?? e.userId.slice(0, 8)} · {e.mode}
                       </span>
                     </p>
+                    {e.remarks && (
+                      <p className="mt-0.5 text-xs text-accent">{e.remarks}</p>
+                    )}
                     <p className="mt-0.5 text-xs text-muted">
                       {new Date(e.createdAt).toLocaleString()} · {e.unitCount} units ·
                       charity v{e.charitySplitVersion}

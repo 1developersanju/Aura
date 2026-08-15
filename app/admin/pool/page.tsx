@@ -112,7 +112,7 @@ export default function AdminPoolSettingsPage() {
 
       <Section
         title="Loyalty tiers"
-        description="Each tier is leftover referral earn vs these thresholds. When leftover covers the next unpaid fee, that fee is deducted and 4-way split. The badge then follows whatever earn is left — this applies to Silver, Gold, Diamond, and Platinum, not only ₹100."
+        description="Pay the next fee from referral earn (4-way split) and keep that rank. Leftover earn is progress toward the next tier — it does not drop a paid badge. Same rule for Silver, Gold, Diamond, and Platinum."
       >
         <div className="space-y-2">
           {pool.tiers.map((t) => (
@@ -132,11 +132,10 @@ export default function AdminPoolSettingsPage() {
         </div>
         <div className="panel mt-4 space-y-3">
           <p className="text-sm text-muted">
-            The badge is leftover referral earn against every threshold
-            (₹1 / ₹100 / ₹1,000 / ₹10,000 / ₹1,00,000). Paying a fee does not
-            freeze that rank. If leftover falls below Gold, they are not Gold —
-            same for Diamond and Platinum. Fees already taken are not charged
-            again.
+            Gifted unpaid ranks drop. Anyone who already paid a fee keeps that
+            tier even if leftover earn is below the fee (₹82 after a ₹100
+            Silver payment stays Silver). Leftover then goes toward the next
+            unpaid fee.
           </p>
           <button
             type="button"
@@ -145,7 +144,7 @@ export default function AdminPoolSettingsPage() {
             onClick={async () => {
               if (
                 !confirm(
-                  "Reset badges to leftover earn for every tier, then charge any unpaid fees they can still afford?"
+                  "Normalise unpaid ranks, keep paid badges, and charge leftover earn for the next fees they can afford?"
                 )
               ) {
                 return;

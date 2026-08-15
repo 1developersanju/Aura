@@ -500,6 +500,9 @@ function MemberDrawer({
                     {new Date(e.createdAt).toLocaleString()}
                   </span>
                 </div>
+                {e.remarks && (
+                  <p className="mt-1 text-xs text-accent">{e.remarks}</p>
+                )}
                 <p className="mt-1 text-[11px] text-muted">
                   ops {formatPaise(e.fourWay.opsPaise)} · charity{" "}
                   {formatPaise(e.fourWay.charityPaise)} · reinvest{" "}

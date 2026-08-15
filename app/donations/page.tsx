@@ -43,7 +43,7 @@ function HistoryPanel() {
 
   const progress = useMemo(() => {
     if (!user || !pool) return null;
-    return nextTierProgress(user.referralEarnPaise, pool.tiers);
+    return nextTierProgress(user.tier, user.referralEarnPaise, pool.tiers);
   }, [user, pool]);
 
   const claimablePaise = useMemo(
@@ -93,9 +93,6 @@ function HistoryPanel() {
           <p className="text-xs uppercase tracking-wider text-muted">Tier</p>
           <p className="mt-1 font-display text-2xl">
             {progress?.current.name ?? `Tier ${user.tier}`}
-          </p>
-          <p className="mt-0.5 text-xs text-muted">
-            From leftover referral earn
           </p>
         </div>
         <div className="panel py-4">
@@ -191,6 +188,9 @@ function HistoryPanel() {
               <p className="font-medium text-foreground">
                 {formatPaise(d.amountPaise)}
               </p>
+              {d.remarks && (
+                <p className="text-xs text-accent">{d.remarks}</p>
+              )}
               <p className="text-xs text-muted">
                 {new Date(d.createdAt).toLocaleString()} · {d.unitCount} units · DEMO
               </p>

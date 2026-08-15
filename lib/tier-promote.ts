@@ -1,5 +1,4 @@
 import { processEntryUnits, type EngineUser, type ProcessEntryResult } from "./pool-engine";
-import { tierFromReferralEarn } from "./pool-config";
 import type { PoolConfig, SplitAllocation } from "./types";
 
 export type RankedUser = EngineUser & { tier: number };
@@ -24,7 +23,7 @@ function nextUnpaidTier(
 }
 
 function syncDisplayTier(user: RankedUser, pool: PoolConfig) {
-  user.tier = tierFromReferralEarn(user.referralEarnPaise, pool.tiers);
+  user.tier = tierFromFeesPaid(user.tierFeePaidPaise, pool);
 }
 
 function mergeUpdates(
@@ -39,10 +38,9 @@ function mergeUpdates(
 }
 
 /**
- * Charge the next unpaid fee when leftover earn covers it, for every
- * tier (Silver → Platinum). The badge is leftover earn vs all
- * thresholds, so paying Gold then dropping below ₹1,000 is Starter or
- * Silver — not a frozen Gold. Already-paid fees are not charged twice.
+ * When leftover earn covers the next unpaid fee, deduct it, 4-way split,
+ * and keep that rank. Leftover below the fee does not drop the badge —
+ * it counts toward the next tier (Silver → Gold → Diamond → Platinum).
  */
 export function runReferralTierPromotions(input: {
   usersById: Record<string, RankedUser>;
@@ -72,10 +70,7 @@ export function runReferralTierPromotions(input: {
       const next = nextUnpaidTier(user.tierFeePaidPaise, input.pool);
       if (!next || user.referralEarnPaise < next.minPaise) break;
 
-      const fromTier = tierFromReferralEarn(
-        user.referralEarnPaise,
-        input.pool.tiers
-      );
+      const fromTier = user.tier;
       user.referralEarnPaise -= next.minPaise;
       voucherDebits[userId] = (voucherDebits[userId] ?? 0) + next.minPaise;
 
@@ -89,12 +84,12 @@ export function runReferralTierPromotions(input: {
       });
       mergeUpdates(usersById, result.userUpdates);
       usersById[userId]!.tierFeePaidPaise += next.minPaise;
-      syncDisplayTier(usersById[userId]!, input.pool);
+      usersById[userId]!.tier = next.tier;
 
       promotions.push({
         userId,
         fromTier,
-        toTier: usersById[userId]!.tier,
+        toTier: next.tier,
         costPaise: next.minPaise,
         result,
       });
@@ -148,8 +143,9 @@ export function tierFromFeesPaid(paidPaise: number, pool: PoolConfig): number {
 }
 
 /**
- * Drop gifted / frozen ranks to leftover earn (all tiers), then charge
- * remaining earn through unpaid upgrade fees until they cannot pay more.
+ * Gifted ranks with no fee paid drop to what fees cover, then leftover
+ * earn pays Silver / Gold / … in order. Paid ranks are kept even when
+ * leftover is below that tier’s threshold.
  */
 export function settleLegacyTiers(input: {
   usersById: Record<string, RankedUser>;
@@ -167,9 +163,9 @@ export function settleLegacyTiers(input: {
   for (const id of input.donorIds) {
     const user = input.usersById[id];
     if (!user) continue;
-    const live = tierFromReferralEarn(user.referralEarnPaise, input.pool.tiers);
-    if (user.tier > live) demoted += 1;
-    syncDisplayTier(user, input.pool);
+    const earnedTier = tierFromFeesPaid(user.tierFeePaidPaise, input.pool);
+    if (user.tier > earnedTier) demoted += 1;
+    user.tier = earnedTier;
   }
 
   const { usersById, promotions, voucherDebits } = runReferralTierPromotions({

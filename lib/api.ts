@@ -37,6 +37,11 @@ type Api = {
   listUsers(): Promise<AuraUser[]>;
   promoteAdmin(email: string): Promise<AuraUser>;
   rebuildSpilloverTree(): Promise<{ updated: number }>;
+  settleLegacyTiers(): Promise<{
+    demoted: number;
+    charged: number;
+    usersTouched: number;
+  }>;
   listDestinations(): Promise<Destination[]>;
   createDestination(input: { name: string; kind: DestinationKind }): Promise<Destination>;
   updateDestination(

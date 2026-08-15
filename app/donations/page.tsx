@@ -43,7 +43,7 @@ function HistoryPanel() {
 
   const progress = useMemo(() => {
     if (!user || !pool) return null;
-    return nextTierProgress(user.referralEarnPaise, pool.tiers);
+    return nextTierProgress(user.tier, user.referralEarnPaise, pool.tiers);
   }, [user, pool]);
 
   const claimablePaise = useMemo(

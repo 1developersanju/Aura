@@ -58,6 +58,8 @@ export type EngineUser = {
   reinvestPaise: number;
   lifetimePaise: number;
   referralEarnPaise: number;
+  tier: number;
+  tierFeePaidPaise: number;
 };
 
 export type ProcessEntryInput = {

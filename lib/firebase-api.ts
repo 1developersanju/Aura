@@ -26,12 +26,11 @@ import { adminBootstrapEmail, getFirebaseAuth, getFirestoreDb } from "./firebase
 import { generateReferralCode, normalizeReferralCode } from "./ids";
 import { paiseToRupees, rupeesToPaise } from "./paise";
 import {
-  DEFAULT_TIERS,
   defaultPoolConfig,
   defaultProductConfig,
-  tierFromReferralEarn,
 } from "./pool-config";
 import { processEntryUnits, type EngineUser } from "./pool-engine";
+import { netVoucherDelta, runReferralTierPromotions, settleLegacyTiers } from "./tier-promote";
 import { sumPercents } from "./split";
 import type {
   AuraUser,
@@ -67,12 +66,11 @@ function mapAuraUser(uid: string, data: Record<string, unknown>): AuraUser {
     createdAt: tsToIso(data.createdAt as Timestamp | string | undefined),
     reinvestPaise: typeof data.reinvestPaise === "number" ? data.reinvestPaise : 0,
     lifetimePaise: typeof data.lifetimePaise === "number" ? data.lifetimePaise : 0,
+    tier: typeof data.tier === "number" ? data.tier : 1,
     referralEarnPaise:
       typeof data.referralEarnPaise === "number" ? data.referralEarnPaise : 0,
-    tier: tierFromReferralEarn(
-      typeof data.referralEarnPaise === "number" ? data.referralEarnPaise : 0,
-      DEFAULT_TIERS
-    ),
+    tierFeePaidPaise:
+      typeof data.tierFeePaidPaise === "number" ? data.tierFeePaidPaise : 0,
   };
 }
 
@@ -248,6 +246,7 @@ export async function firebaseEnsureProfile(
     lifetimePaise: 0,
     tier: 1,
     referralEarnPaise: 0,
+    tierFeePaidPaise: 0,
   };
 
   await setDoc(ref, {
@@ -743,6 +742,8 @@ export const firebaseApi = {
         reinvestPaise: mapped.reinvestPaise,
         lifetimePaise: mapped.lifetimePaise,
         referralEarnPaise: mapped.referralEarnPaise,
+        tier: mapped.tier,
+        tierFeePaidPaise: mapped.tierFeePaidPaise,
       };
       referralCodes[d.id] = mapped.referralCode;
     }
@@ -771,6 +772,25 @@ export const firebaseApi = {
       destinationNames: names,
     });
 
+    for (const [uidKey, upd] of Object.entries(result.userUpdates)) {
+      const prev = usersById[uidKey];
+      if (!prev) continue;
+      usersById[uidKey] = { ...prev, ...upd };
+    }
+
+    const { promotions, voucherDebits, usersById: ranked } = runReferralTierPromotions({
+      usersById,
+      seedUserIds: Object.keys(result.userUpdates),
+      pool,
+      charityAllocations: activeAllocations,
+      destinationNames: names,
+    });
+
+    const voucherNet = netVoucherDelta(
+      [result.voucherCredits, ...promotions.map((p) => p.result.voucherCredits)],
+      voucherDebits
+    );
+
     const existingVouchers = await this.listAllVouchers();
     const nowIso = new Date().toISOString();
     const entryRef = doc(collection(db, "entries"));
@@ -778,23 +798,28 @@ export const firebaseApi = {
 
     const batch = writeBatch(db);
 
-    for (const [uid, addPaise] of Object.entries(result.voucherCredits)) {
-      if (addPaise <= 0) continue;
-      const open = existingVouchers.find(
-        (v) => v.userId === uid && v.status === "open"
-      );
-      if (open) {
-        voucherIds.push(open.id);
-        batch.update(doc(db, "vouchers", open.id), {
-          valuePaise: increment(addPaise),
+    const openByUser = new Map<string, string>();
+    for (const v of existingVouchers) {
+      if (v.status === "open" && !openByUser.has(v.userId)) {
+        openByUser.set(v.userId, v.id);
+      }
+    }
+
+    for (const [uid, delta] of Object.entries(voucherNet)) {
+      if (delta === 0) continue;
+      const openId = openByUser.get(uid);
+      if (openId) {
+        voucherIds.push(openId);
+        batch.update(doc(db, "vouchers", openId), {
+          valuePaise: increment(delta),
         });
-      } else {
+      } else if (delta > 0) {
         const voucherRef = doc(collection(db, "vouchers"));
         voucherIds.push(voucherRef.id);
         batch.set(voucherRef, {
           userId: uid,
           code: `${referralCodes[uid] ?? "REF"}_CREDIT`,
-          valuePaise: addPaise,
+          valuePaise: delta,
           status: "open",
           createdAt: serverTimestamp(),
           redeemedAt: null,
@@ -802,39 +827,81 @@ export const firebaseApi = {
       }
     }
 
-    batch.set(entryRef, {
-      userId,
-      amountPaise,
-      mode: product.mode,
-      createdAt: serverTimestamp(),
-      unitCount: result.unitCount,
-      fourWay: result.fourWay,
-      charityAllocations: result.charityAllocations,
-      referralPayouts: result.referralPayouts,
-      charitySplitVersion: split.version,
-      vouchersSpawned: voucherIds,
-    });
+    function writeProcessResult(
+      ref: ReturnType<typeof doc>,
+      actorId: string,
+      amount: number,
+      proc: typeof result
+    ) {
+      batch.set(ref, {
+        userId: actorId,
+        amountPaise: amount,
+        mode: product.mode,
+        createdAt: serverTimestamp(),
+        unitCount: proc.unitCount,
+        fourWay: proc.fourWay,
+        charityAllocations: proc.charityAllocations,
+        referralPayouts: proc.referralPayouts,
+        charitySplitVersion: split.version,
+        vouchersSpawned: voucherIds,
+      });
+    }
 
-    for (const [uidKey, upd] of Object.entries(result.userUpdates)) {
+    writeProcessResult(entryRef, userId, amountPaise, result);
+    for (const promo of promotions) {
+      writeProcessResult(
+        doc(collection(db, "entries")),
+        promo.userId,
+        promo.costPaise,
+        promo.result
+      );
+    }
+
+    const dirty = new Set<string>([
+      userId,
+      ...Object.keys(result.userUpdates),
+      ...promotions.flatMap((p) => [
+        p.userId,
+        ...Object.keys(p.result.userUpdates),
+      ]),
+    ]);
+    for (const uidKey of dirty) {
+      const upd = ranked[uidKey];
+      if (!upd) continue;
       batch.update(doc(db, "users", uidKey), {
         reinvestPaise: upd.reinvestPaise,
         lifetimePaise: upd.lifetimePaise,
         referralEarnPaise: upd.referralEarnPaise,
-        tier: tierFromReferralEarn(upd.referralEarnPaise, pool.tiers),
+        tier: upd.tier,
+        tierFeePaidPaise: upd.tierFeePaidPaise,
       });
     }
 
-    for (const id of ["ops", "charity", "dust"] as SystemWalletId[]) {
-      const delta =
-        id === "ops"
-          ? result.systemOpsDelta
-          : id === "charity"
-            ? result.systemCharityDelta
-            : result.systemDustDelta;
+    let opsDelta = result.systemOpsDelta;
+    let charityDelta = result.systemCharityDelta;
+    let dustDelta = result.systemDustDelta;
+    const purposeDelta = new Map<string, number>();
+    function addPurpose(id: string, n: number) {
+      purposeDelta.set(id, (purposeDelta.get(id) ?? 0) + n);
+    }
+    for (const alloc of result.charityAllocations) addPurpose(alloc.destinationId, alloc.amountPaise);
+    for (const promo of promotions) {
+      opsDelta += promo.result.systemOpsDelta;
+      charityDelta += promo.result.systemCharityDelta;
+      dustDelta += promo.result.systemDustDelta;
+      for (const alloc of promo.result.charityAllocations) {
+        addPurpose(alloc.destinationId, alloc.amountPaise);
+      }
+    }
+
+    for (const [id, delta] of [
+      ["ops", opsDelta],
+      ["charity", charityDelta],
+      ["dust", dustDelta],
+    ] as const) {
       if (delta === 0) continue;
-      const walletRef = doc(db, "systemWallets", id);
       batch.set(
-        walletRef,
+        doc(db, "systemWallets", id),
         {
           id,
           balancePaise: increment(delta),
@@ -844,15 +911,14 @@ export const firebaseApi = {
       );
     }
 
-    for (const alloc of result.charityAllocations) {
-      if (alloc.amountPaise === 0) continue;
-      const walletRef = doc(db, "wallets", alloc.destinationId);
+    for (const [destinationId, amountPaise] of purposeDelta) {
+      if (amountPaise === 0) continue;
       batch.set(
-        walletRef,
+        doc(db, "wallets", destinationId),
         {
-          destinationId: alloc.destinationId,
-          balancePaise: increment(alloc.amountPaise),
-          balance: increment(paiseToRupees(alloc.amountPaise)),
+          destinationId,
+          balancePaise: increment(amountPaise),
+          balance: increment(paiseToRupees(amountPaise)),
           updatedAt: serverTimestamp(),
         },
         { merge: true }
@@ -996,6 +1062,7 @@ export const firebaseApi = {
           lifetimePaise: 0,
           reinvestPaise: 0,
           referralEarnPaise: 0,
+          tierFeePaidPaise: 0,
           tier: 1,
         })
     );
@@ -1005,6 +1072,163 @@ export const firebaseApi = {
       vouchers: vouchersSnap.size,
       usersReset: donors.length,
       wallets: 3 + walletsSnap.size,
+    };
+  },
+
+  async settleLegacyTiers(): Promise<{
+    demoted: number;
+    charged: number;
+    usersTouched: number;
+  }> {
+    const db = getFirestoreDb()!;
+    const usersSnap = await getDocs(collection(db, "users"));
+    const usersById: Record<string, EngineUser> = {};
+    const referralCodes: Record<string, string> = {};
+    const donorIds: string[] = [];
+    for (const d of usersSnap.docs) {
+      const mapped = mapAuraUser(d.id, d.data() as Record<string, unknown>);
+      usersById[d.id] = {
+        uid: mapped.uid,
+        referredBy: mapped.referredBy,
+        reinvestPaise: mapped.reinvestPaise,
+        lifetimePaise: mapped.lifetimePaise,
+        referralEarnPaise: mapped.referralEarnPaise,
+        tier: mapped.tier,
+        tierFeePaidPaise: mapped.tierFeePaidPaise,
+      };
+      referralCodes[d.id] = mapped.referralCode;
+      if (mapped.role !== "admin") donorIds.push(d.id);
+    }
+
+    const [pool, product, split, destinations] = await Promise.all([
+      this.getPoolConfig(),
+      this.getProductConfig(),
+      this.getSplit(),
+      this.listDestinations(),
+    ]);
+    const names: Record<string, string> = {};
+    for (const d of destinations) names[d.id] = d.name;
+    const activeIds = new Set(destinations.filter((x) => x.active).map((x) => x.id));
+    const activeAllocations = split.allocations.filter((a) =>
+      activeIds.has(a.destinationId)
+    );
+
+    const { promotions, voucherDebits, usersById: ranked, demoted } =
+      settleLegacyTiers({
+        usersById,
+        donorIds,
+        pool,
+        charityAllocations: activeAllocations,
+        destinationNames: names,
+      });
+
+    const voucherNet = netVoucherDelta(
+      promotions.map((p) => p.result.voucherCredits),
+      voucherDebits
+    );
+    const existingVouchers = await this.listAllVouchers();
+    const batch = writeBatch(db);
+    const openByUser = new Map<string, string>();
+    for (const v of existingVouchers) {
+      if (v.status === "open" && !openByUser.has(v.userId)) {
+        openByUser.set(v.userId, v.id);
+      }
+    }
+    for (const [uid, delta] of Object.entries(voucherNet)) {
+      if (delta === 0) continue;
+      const openId = openByUser.get(uid);
+      if (openId) {
+        batch.update(doc(db, "vouchers", openId), {
+          valuePaise: increment(delta),
+        });
+      } else if (delta > 0) {
+        batch.set(doc(collection(db, "vouchers")), {
+          userId: uid,
+          code: `${referralCodes[uid] ?? "REF"}_CREDIT`,
+          valuePaise: delta,
+          status: "open",
+          createdAt: serverTimestamp(),
+          redeemedAt: null,
+        });
+      }
+    }
+
+    for (const promo of promotions) {
+      batch.set(doc(collection(db, "entries")), {
+        userId: promo.userId,
+        amountPaise: promo.costPaise,
+        mode: product.mode,
+        createdAt: serverTimestamp(),
+        unitCount: promo.result.unitCount,
+        fourWay: promo.result.fourWay,
+        charityAllocations: promo.result.charityAllocations,
+        referralPayouts: promo.result.referralPayouts,
+        charitySplitVersion: split.version,
+        vouchersSpawned: [],
+      });
+    }
+
+    for (const id of donorIds) {
+      const upd = ranked[id];
+      if (!upd) continue;
+      batch.update(doc(db, "users", id), {
+        reinvestPaise: upd.reinvestPaise,
+        lifetimePaise: upd.lifetimePaise,
+        referralEarnPaise: upd.referralEarnPaise,
+        tier: upd.tier,
+        tierFeePaidPaise: upd.tierFeePaidPaise,
+      });
+    }
+
+    let opsDelta = 0;
+    let charityDelta = 0;
+    let dustDelta = 0;
+    const purposeDelta = new Map<string, number>();
+    for (const promo of promotions) {
+      opsDelta += promo.result.systemOpsDelta;
+      charityDelta += promo.result.systemCharityDelta;
+      dustDelta += promo.result.systemDustDelta;
+      for (const alloc of promo.result.charityAllocations) {
+        purposeDelta.set(
+          alloc.destinationId,
+          (purposeDelta.get(alloc.destinationId) ?? 0) + alloc.amountPaise
+        );
+      }
+    }
+    for (const [id, delta] of [
+      ["ops", opsDelta],
+      ["charity", charityDelta],
+      ["dust", dustDelta],
+    ] as const) {
+      if (delta === 0) continue;
+      batch.set(
+        doc(db, "systemWallets", id),
+        { id, balancePaise: increment(delta), updatedAt: serverTimestamp() },
+        { merge: true }
+      );
+    }
+    for (const [destinationId, amountPaise] of purposeDelta) {
+      if (amountPaise === 0) continue;
+      batch.set(
+        doc(db, "wallets", destinationId),
+        {
+          destinationId,
+          balancePaise: increment(amountPaise),
+          balance: increment(paiseToRupees(amountPaise)),
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
+    }
+
+    if (promotions.length > 0 || demoted > 0 || donorIds.length > 0) {
+      await batch.commit();
+    }
+
+    return {
+      demoted,
+      charged: promotions.length,
+      usersTouched: donorIds.length,
     };
   },
 };

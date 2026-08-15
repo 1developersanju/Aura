@@ -38,20 +38,17 @@ export function tierFromReferralEarn(
 }
 
 export function nextTierProgress(
+  currentTier: number,
   referralEarnPaise: number,
   tiers: TierThreshold[]
 ): { current: TierThreshold; next: TierThreshold | null; progress: number } {
-  const sorted = [...tiers].sort((a, b) => a.minPaise - b.minPaise);
+  const sorted = [...tiers].sort((a, b) => a.tier - b.tier);
   const current =
-    [...sorted].reverse().find((t) => referralEarnPaise >= t.minPaise) ??
-    sorted[0]!;
-  const next = sorted.find((t) => t.minPaise > referralEarnPaise) ?? null;
+    sorted.find((t) => t.tier === currentTier) ?? sorted[0]!;
+  const next = sorted.find((t) => t.tier === currentTier + 1) ?? null;
   if (!next) {
     return { current, next: null, progress: 1 };
   }
-  const prevMin = current.minPaise;
-  const span = next.minPaise - prevMin;
-  const progress =
-    span <= 0 ? 1 : Math.min(1, (referralEarnPaise - prevMin) / span);
+  const progress = Math.min(1, Math.max(0, referralEarnPaise / next.minPaise));
   return { current, next, progress };
 }

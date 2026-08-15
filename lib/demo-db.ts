@@ -4,12 +4,11 @@ import { adminBootstrapEmail } from "./firebase";
 import { generateReferralCode, normalizeReferralCode, uid } from "./ids";
 import { paiseToRupees, rupeesToPaise } from "./paise";
 import {
-  DEFAULT_TIERS,
   defaultPoolConfig,
   defaultProductConfig,
-  tierFromReferralEarn,
 } from "./pool-config";
 import { processEntryUnits, type EngineUser } from "./pool-engine";
+import { netVoucherDelta, runReferralTierPromotions, settleLegacyTiers } from "./tier-promote";
 import { sumPercents } from "./split";
 import type {
   AuraUser,
@@ -110,7 +109,8 @@ function normalizeUser(raw: Partial<AuraUser> & { uid: string; email: string }):
     reinvestPaise: raw.reinvestPaise ?? 0,
     lifetimePaise: raw.lifetimePaise ?? 0,
     referralEarnPaise: raw.referralEarnPaise ?? 0,
-    tier: tierFromReferralEarn(raw.referralEarnPaise ?? 0, DEFAULT_TIERS),
+    tierFeePaidPaise: raw.tierFeePaidPaise ?? 0,
+    tier: raw.tier ?? 1,
   };
 }
 
@@ -536,6 +536,8 @@ export const demoDb = {
         reinvestPaise: a.reinvestPaise,
         lifetimePaise: a.lifetimePaise,
         referralEarnPaise: a.referralEarnPaise,
+        tier: a.tier,
+        tierFeePaidPaise: a.tierFeePaidPaise,
       };
     }
 
@@ -555,24 +557,42 @@ export const demoDb = {
       destinationNames: names,
     });
 
+    for (const [uidKey, upd] of Object.entries(result.userUpdates)) {
+      const prev = usersById[uidKey];
+      if (!prev) continue;
+      usersById[uidKey] = { ...prev, ...upd };
+    }
+
+    const { promotions, voucherDebits, usersById: ranked } = runReferralTierPromotions({
+      usersById,
+      seedUserIds: Object.keys(result.userUpdates),
+      pool: state.pool,
+      charityAllocations: activeAllocations,
+      destinationNames: names,
+    });
+
     const now = new Date().toISOString();
+    const voucherNet = netVoucherDelta(
+      [result.voucherCredits, ...promotions.map((p) => p.result.voucherCredits)],
+      voucherDebits
+    );
     const voucherIds: string[] = [];
-    for (const [creditUid, addPaise] of Object.entries(result.voucherCredits)) {
-      if (addPaise <= 0) continue;
+    for (const [creditUid, delta] of Object.entries(voucherNet)) {
+      if (delta === 0) continue;
       const open = state.vouchers.find(
         (v) => v.userId === creditUid && v.status === "open"
       );
       if (open) {
-        open.valuePaise += addPaise;
+        open.valuePaise = Math.max(0, open.valuePaise + delta);
         voucherIds.push(open.id);
-      } else {
+      } else if (delta > 0) {
         const id = uid();
         const holder = state.accounts.find((a) => a.uid === creditUid);
         state.vouchers.push({
           id,
           userId: creditUid,
           code: `${holder?.referralCode ?? "REF"}_CREDIT`,
-          valuePaise: addPaise,
+          valuePaise: delta,
           status: "open",
           createdAt: now,
           redeemedAt: null,
@@ -581,49 +601,90 @@ export const demoDb = {
       }
     }
 
-    for (const [uidKey, upd] of Object.entries(result.userUpdates)) {
+    const dirty = new Set<string>([
+      userId,
+      ...Object.keys(result.userUpdates),
+      ...promotions.flatMap((p) => [
+        p.userId,
+        ...Object.keys(p.result.userUpdates),
+      ]),
+    ]);
+    for (const uidKey of dirty) {
+      const upd = ranked[uidKey];
       const acc = state.accounts.find((a) => a.uid === uidKey);
-      if (!acc) continue;
+      if (!acc || !upd) continue;
       acc.reinvestPaise = upd.reinvestPaise;
       acc.lifetimePaise = upd.lifetimePaise;
       acc.referralEarnPaise = upd.referralEarnPaise;
-      acc.tier = tierFromReferralEarn(acc.referralEarnPaise, state.pool.tiers);
+      acc.tier = upd.tier;
+      acc.tierFeePaidPaise = upd.tierFeePaidPaise;
     }
 
-    bumpSystem(state, "ops", result.systemOpsDelta, now);
-    bumpSystem(state, "charity", result.systemCharityDelta, now);
-    bumpSystem(state, "dust", result.systemDustDelta, now);
+    let opsDelta = result.systemOpsDelta;
+    let charityDelta = result.systemCharityDelta;
+    let dustDelta = result.systemDustDelta;
+    for (const promo of promotions) {
+      opsDelta += promo.result.systemOpsDelta;
+      charityDelta += promo.result.systemCharityDelta;
+      dustDelta += promo.result.systemDustDelta;
+    }
+    bumpSystem(state, "ops", opsDelta, now);
+    bumpSystem(state, "charity", charityDelta, now);
+    bumpSystem(state, "dust", dustDelta, now);
 
+    const purposeDelta = new Map<string, number>();
     for (const alloc of result.charityAllocations) {
-      let wallet = state.wallets.find((w) => w.destinationId === alloc.destinationId);
+      purposeDelta.set(
+        alloc.destinationId,
+        (purposeDelta.get(alloc.destinationId) ?? 0) + alloc.amountPaise
+      );
+    }
+    for (const promo of promotions) {
+      for (const alloc of promo.result.charityAllocations) {
+        purposeDelta.set(
+          alloc.destinationId,
+          (purposeDelta.get(alloc.destinationId) ?? 0) + alloc.amountPaise
+        );
+      }
+    }
+    for (const [destinationId, amountPaise] of purposeDelta) {
+      let wallet = state.wallets.find((w) => w.destinationId === destinationId);
       if (!wallet) {
         wallet = {
-          destinationId: alloc.destinationId,
+          destinationId,
           balancePaise: 0,
           balance: 0,
           updatedAt: now,
         };
         state.wallets.push(wallet);
       }
-      wallet.balancePaise += alloc.amountPaise;
+      wallet.balancePaise += amountPaise;
       wallet.balance = paiseToRupees(wallet.balancePaise);
       wallet.updatedAt = now;
     }
 
-    const entry: LedgerEntry = {
-      id: uid(),
-      userId,
-      amountPaise,
-      mode: state.product.mode,
-      createdAt: now,
-      unitCount: result.unitCount,
-      fourWay: result.fourWay,
-      charityAllocations: result.charityAllocations,
-      referralPayouts: result.referralPayouts,
-      charitySplitVersion: state.split.version,
-      vouchersSpawned: voucherIds,
-    };
-    state.entries.unshift(entry);
+    function pushEntry(actorId: string, amount: number, proc: typeof result) {
+      const entry: LedgerEntry = {
+        id: uid(),
+        userId: actorId,
+        amountPaise: amount,
+        mode: state.product.mode,
+        createdAt: now,
+        unitCount: proc.unitCount,
+        fourWay: proc.fourWay,
+        charityAllocations: proc.charityAllocations,
+        referralPayouts: proc.referralPayouts,
+        charitySplitVersion: state.split.version,
+        vouchersSpawned: voucherIds,
+      };
+      state.entries.unshift(entry);
+      return entry;
+    }
+
+    const entry = pushEntry(userId, amountPaise, result);
+    for (const promo of promotions) {
+      pushEntry(promo.userId, promo.costPaise, promo.result);
+    }
     write(state);
     notifyDemoAuthChanged();
     return entry;
@@ -695,6 +756,7 @@ export const demoDb = {
       a.lifetimePaise = 0;
       a.reinvestPaise = 0;
       a.referralEarnPaise = 0;
+      a.tierFeePaidPaise = 0;
       a.tier = 1;
       usersReset += 1;
     }
@@ -704,6 +766,129 @@ export const demoDb = {
       vouchers,
       usersReset,
       wallets: state.systemWallets.length + state.wallets.length,
+    };
+  },
+
+  async settleLegacyTiers(): Promise<{
+    demoted: number;
+    charged: number;
+    usersTouched: number;
+  }> {
+    const state = read();
+    const usersById: Record<string, EngineUser> = {};
+    const donorIds: string[] = [];
+    for (const a of state.accounts) {
+      usersById[a.uid] = {
+        uid: a.uid,
+        referredBy: a.referredBy,
+        reinvestPaise: a.reinvestPaise,
+        lifetimePaise: a.lifetimePaise,
+        referralEarnPaise: a.referralEarnPaise,
+        tier: a.tier,
+        tierFeePaidPaise: a.tierFeePaidPaise ?? 0,
+      };
+      if (a.role !== "admin") donorIds.push(a.uid);
+    }
+
+    const names: Record<string, string> = {};
+    for (const d of state.destinations) names[d.id] = d.name;
+    const activeAllocations = state.split.allocations.filter((alloc) => {
+      const dest = state.destinations.find((x) => x.id === alloc.destinationId);
+      return dest?.active;
+    });
+
+    const { promotions, voucherDebits, usersById: ranked, demoted } =
+      settleLegacyTiers({
+        usersById,
+        donorIds,
+        pool: state.pool,
+        charityAllocations: activeAllocations,
+        destinationNames: names,
+      });
+
+    const now = new Date().toISOString();
+    const voucherNet = netVoucherDelta(
+      promotions.map((p) => p.result.voucherCredits),
+      voucherDebits
+    );
+    for (const [creditUid, delta] of Object.entries(voucherNet)) {
+      if (delta === 0) continue;
+      const open = state.vouchers.find(
+        (v) => v.userId === creditUid && v.status === "open"
+      );
+      if (open) {
+        open.valuePaise = Math.max(0, open.valuePaise + delta);
+      } else if (delta > 0) {
+        const holder = state.accounts.find((a) => a.uid === creditUid);
+        state.vouchers.push({
+          id: uid(),
+          userId: creditUid,
+          code: `${holder?.referralCode ?? "REF"}_CREDIT`,
+          valuePaise: delta,
+          status: "open",
+          createdAt: now,
+          redeemedAt: null,
+        });
+      }
+    }
+
+    for (const id of donorIds) {
+      const upd = ranked[id];
+      const acc = state.accounts.find((a) => a.uid === id);
+      if (!acc || !upd) continue;
+      acc.reinvestPaise = upd.reinvestPaise;
+      acc.lifetimePaise = upd.lifetimePaise;
+      acc.referralEarnPaise = upd.referralEarnPaise;
+      acc.tier = upd.tier;
+      acc.tierFeePaidPaise = upd.tierFeePaidPaise;
+    }
+
+    let opsDelta = 0;
+    let charityDelta = 0;
+    let dustDelta = 0;
+    for (const promo of promotions) {
+      opsDelta += promo.result.systemOpsDelta;
+      charityDelta += promo.result.systemCharityDelta;
+      dustDelta += promo.result.systemDustDelta;
+      const entry: LedgerEntry = {
+        id: uid(),
+        userId: promo.userId,
+        amountPaise: promo.costPaise,
+        mode: state.product.mode,
+        createdAt: now,
+        unitCount: promo.result.unitCount,
+        fourWay: promo.result.fourWay,
+        charityAllocations: promo.result.charityAllocations,
+        referralPayouts: promo.result.referralPayouts,
+        charitySplitVersion: state.split.version,
+        vouchersSpawned: [],
+      };
+      state.entries.unshift(entry);
+      for (const alloc of promo.result.charityAllocations) {
+        let wallet = state.wallets.find((w) => w.destinationId === alloc.destinationId);
+        if (!wallet) {
+          wallet = {
+            destinationId: alloc.destinationId,
+            balancePaise: 0,
+            balance: 0,
+            updatedAt: now,
+          };
+          state.wallets.push(wallet);
+        }
+        wallet.balancePaise += alloc.amountPaise;
+        wallet.balance = paiseToRupees(wallet.balancePaise);
+        wallet.updatedAt = now;
+      }
+    }
+    bumpSystem(state, "ops", opsDelta, now);
+    bumpSystem(state, "charity", charityDelta, now);
+    bumpSystem(state, "dust", dustDelta, now);
+    write(state);
+    notifyDemoAuthChanged();
+    return {
+      demoted,
+      charged: promotions.length,
+      usersTouched: donorIds.length,
     };
   },
 };

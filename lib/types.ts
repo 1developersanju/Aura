@@ -15,6 +15,8 @@ export type AuraUser = {
   lifetimePaise: number;
   tier: number;
   referralEarnPaise: number;
+  /** Upgrade fees already taken from referral earn (legacy settle uses this). */
+  tierFeePaidPaise: number;
 };
 
 export type Destination = {

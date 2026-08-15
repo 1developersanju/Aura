@@ -18,6 +18,7 @@ export default function AdminPoolSettingsPage() {
   const [message, setMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [settling, setSettling] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -111,7 +112,7 @@ export default function AdminPoolSettingsPage() {
 
       <Section
         title="Loyalty tiers"
-        description="Tiers follow referral earn, not entry volume. Read-only for this POC."
+        description="Upgrade fees come from referral earn, then that fee is 4-way split (ops / charity / reinvest / referral) and the member is promoted. Thresholds are read-only for this POC."
       >
         <div className="space-y-2">
           {pool.tiers.map((t) => (
@@ -128,6 +129,45 @@ export default function AdminPoolSettingsPage() {
               </span>
             </div>
           ))}
+        </div>
+        <div className="panel mt-4 space-y-3">
+          <p className="text-sm text-muted">
+            Early members who were given a higher tier without paying the upgrade
+            fee are normalised here. Unpaid ranks drop toward Starter. Remaining
+            referral earn then pays Silver / Gold / … in order, each fee running
+            the 4-way split.
+          </p>
+          <button
+            type="button"
+            className="btn-primary"
+            disabled={settling}
+            onClick={async () => {
+              if (
+                !confirm(
+                  "Normalise legacy tiers? Members without paid fees will drop, then referral earn will be charged for upgrades they can afford."
+                )
+              ) {
+                return;
+              }
+              setSettling(true);
+              setError(null);
+              setMessage(null);
+              try {
+                const result = await getApi().settleLegacyTiers();
+                setMessage(
+                  `Normalised ${result.usersTouched} members. Demoted unpaid ranks: ${result.demoted}. Upgrade fees charged: ${result.charged}.`
+                );
+              } catch (err) {
+                setError(
+                  err instanceof Error ? err.message : "Normalise failed"
+                );
+              } finally {
+                setSettling(false);
+              }
+            }}
+          >
+            {settling ? "Normalising…" : "Normalise unpaid tier upgrades"}
+          </button>
         </div>
       </Section>
     </div>

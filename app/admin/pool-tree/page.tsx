@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Armchair, X } from "lucide-react";
 import { getApi } from "@/lib/api";
 import { formatPaise } from "@/lib/money";
 import { analyzeMember } from "@/lib/member-analytics";
+import { usePageRefresh } from "@/lib/page-refresh";
 import { MAX_DIRECTS } from "@/lib/placement";
 import { buildTheaterRows, setSwatch, type EmptySeat, type FilledSeat, type SetSwatch } from "@/lib/seating";
 import type { AuraUser, LedgerEntry, Voucher } from "@/lib/types";
@@ -30,9 +31,8 @@ export default function AdminPoolTreePage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [emptyHint, setEmptyHint] = useState<EmptySeat | null>(null);
 
-  async function reload() {
+  const load = useCallback(async () => {
     const api = getApi();
-    await api.rebuildSpilloverTree();
     const [u, e, v] = await Promise.all([
       api.listUsers(),
       api.listEntries(),
@@ -42,11 +42,9 @@ export default function AdminPoolTreePage() {
     setEntries(e);
     setVouchers(v);
     setLoading(false);
-  }
-
-  useEffect(() => {
-    reload();
   }, []);
+
+  usePageRefresh(load);
 
   const byId = useMemo(() => {
     const map: Record<string, AuraUser> = {};
@@ -66,7 +64,7 @@ export default function AdminPoolTreePage() {
     setMessage(null);
     try {
       const { updated } = await getApi().rebuildSpilloverTree();
-      await reload();
+      await load();
       setMessageTone("success");
       setMessage(
         updated === 0
@@ -89,14 +87,16 @@ export default function AdminPoolTreePage() {
         title="House seating"
         description={`Complete house: level 0 is 1 seat, level 1 is ${MAX_DIRECTS}, level 2 is ${MAX_DIRECTS ** 2}. Each colour is one set of ${MAX_DIRECTS}. Click a seat for payments and split analytics.`}
         actions={
-          <button
-            type="button"
-            className="btn-primary text-sm"
-            disabled={rebuilding}
-            onClick={rebuildTree}
-          >
-            {rebuilding ? "Reseating…" : "Reseat house"}
-          </button>
+          <>
+            <button
+              type="button"
+              className="btn-ghost text-sm"
+              disabled={rebuilding}
+              onClick={rebuildTree}
+            >
+              {rebuilding ? "Reseating…" : "Reseat house"}
+            </button>
+          </>
         }
       />
 

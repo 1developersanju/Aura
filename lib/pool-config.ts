@@ -25,28 +25,33 @@ export function defaultProductConfig(): ProductConfig {
   };
 }
 
-export function tierFromLifetime(lifetimePaise: number, tiers: TierThreshold[]): number {
+export function tierFromReferralEarn(
+  referralEarnPaise: number,
+  tiers: TierThreshold[]
+): number {
   const sorted = [...tiers].sort((a, b) => a.minPaise - b.minPaise);
   let tier = 1;
   for (const t of sorted) {
-    if (lifetimePaise >= t.minPaise) tier = t.tier;
+    if (referralEarnPaise >= t.minPaise) tier = t.tier;
   }
   return tier;
 }
 
 export function nextTierProgress(
-  lifetimePaise: number,
+  referralEarnPaise: number,
   tiers: TierThreshold[]
 ): { current: TierThreshold; next: TierThreshold | null; progress: number } {
   const sorted = [...tiers].sort((a, b) => a.minPaise - b.minPaise);
   const current =
-    [...sorted].reverse().find((t) => lifetimePaise >= t.minPaise) ?? sorted[0]!;
-  const next = sorted.find((t) => t.minPaise > lifetimePaise) ?? null;
+    [...sorted].reverse().find((t) => referralEarnPaise >= t.minPaise) ??
+    sorted[0]!;
+  const next = sorted.find((t) => t.minPaise > referralEarnPaise) ?? null;
   if (!next) {
     return { current, next: null, progress: 1 };
   }
   const prevMin = current.minPaise;
   const span = next.minPaise - prevMin;
-  const progress = span <= 0 ? 1 : Math.min(1, (lifetimePaise - prevMin) / span);
+  const progress =
+    span <= 0 ? 1 : Math.min(1, (referralEarnPaise - prevMin) / span);
   return { current, next, progress };
 }

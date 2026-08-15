@@ -3,7 +3,12 @@ import { notifyDemoAuthChanged } from "./demo-events";
 import { adminBootstrapEmail } from "./firebase";
 import { generateReferralCode, normalizeReferralCode, uid } from "./ids";
 import { paiseToRupees, rupeesToPaise } from "./paise";
-import { defaultPoolConfig, defaultProductConfig, tierFromLifetime } from "./pool-config";
+import {
+  DEFAULT_TIERS,
+  defaultPoolConfig,
+  defaultProductConfig,
+  tierFromReferralEarn,
+} from "./pool-config";
 import { processEntryUnits, type EngineUser } from "./pool-engine";
 import { sumPercents } from "./split";
 import type {
@@ -104,8 +109,8 @@ function normalizeUser(raw: Partial<AuraUser> & { uid: string; email: string }):
     createdAt: raw.createdAt ?? new Date().toISOString(),
     reinvestPaise: raw.reinvestPaise ?? 0,
     lifetimePaise: raw.lifetimePaise ?? 0,
-    tier: raw.tier ?? 1,
     referralEarnPaise: raw.referralEarnPaise ?? 0,
+    tier: tierFromReferralEarn(raw.referralEarnPaise ?? 0, DEFAULT_TIERS),
   };
 }
 
@@ -582,7 +587,7 @@ export const demoDb = {
       acc.reinvestPaise = upd.reinvestPaise;
       acc.lifetimePaise = upd.lifetimePaise;
       acc.referralEarnPaise = upd.referralEarnPaise;
-      acc.tier = tierFromLifetime(acc.lifetimePaise, state.pool.tiers);
+      acc.tier = tierFromReferralEarn(acc.referralEarnPaise, state.pool.tiers);
     }
 
     bumpSystem(state, "ops", result.systemOpsDelta, now);

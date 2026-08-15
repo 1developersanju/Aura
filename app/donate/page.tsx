@@ -6,6 +6,7 @@ import { RequireAuth } from "@/components/auth/RequireAuth";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { useProduct } from "@/components/providers/ProductProvider";
 import { getApi } from "@/lib/api";
+import { RefreshPageButton } from "@/components/RefreshPageButton";
 
 function EntryForm() {
   const { user, refreshUser } = useAuth();
@@ -35,9 +36,12 @@ function EntryForm() {
 
   return (
     <div className="mx-auto w-full max-w-lg px-4 py-16">
-      <h1 className="font-display text-3xl text-foreground">
-        {isSupermarket ? "Record purchase" : "Donate to Aura"}
-      </h1>
+      <div className="flex items-start justify-between gap-3">
+        <h1 className="font-display text-3xl text-foreground">
+          {isSupermarket ? "Record purchase" : "Donate to Aura"}
+        </h1>
+        <RefreshPageButton />
+      </div>
       <p className="mt-2 text-sm leading-relaxed text-muted">
         {isSupermarket
           ? "Enter a whole-rupee purchase amount. The loyalty engine allocates ops, charity, your reinvestment wallet, and referral rewards in paise."

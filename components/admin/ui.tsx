@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { RefreshPageButton } from "@/components/RefreshPageButton";
 
 export function PageHeader({
   title,
@@ -19,7 +20,10 @@ export function PageHeader({
           <p className="mt-1.5 text-sm leading-relaxed text-muted">{description}</p>
         )}
       </div>
-      {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
+      <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+        {actions}
+        <RefreshPageButton />
+      </div>
     </div>
   );
 }

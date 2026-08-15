@@ -111,7 +111,7 @@ export default function AdminPoolSettingsPage() {
 
       <Section
         title="Loyalty tiers"
-        description="Lifetime entry volume thresholds. Read-only for this POC."
+        description="Tiers follow referral earn, not entry volume. Read-only for this POC."
       >
         <div className="space-y-2">
           {pool.tiers.map((t) => (

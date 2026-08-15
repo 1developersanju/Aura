@@ -26,9 +26,10 @@ import { adminBootstrapEmail, getFirebaseAuth, getFirestoreDb } from "./firebase
 import { generateReferralCode, normalizeReferralCode } from "./ids";
 import { paiseToRupees, rupeesToPaise } from "./paise";
 import {
+  DEFAULT_TIERS,
   defaultPoolConfig,
   defaultProductConfig,
-  tierFromLifetime,
+  tierFromReferralEarn,
 } from "./pool-config";
 import { processEntryUnits, type EngineUser } from "./pool-engine";
 import { sumPercents } from "./split";
@@ -66,9 +67,12 @@ function mapAuraUser(uid: string, data: Record<string, unknown>): AuraUser {
     createdAt: tsToIso(data.createdAt as Timestamp | string | undefined),
     reinvestPaise: typeof data.reinvestPaise === "number" ? data.reinvestPaise : 0,
     lifetimePaise: typeof data.lifetimePaise === "number" ? data.lifetimePaise : 0,
-    tier: typeof data.tier === "number" ? data.tier : 1,
     referralEarnPaise:
       typeof data.referralEarnPaise === "number" ? data.referralEarnPaise : 0,
+    tier: tierFromReferralEarn(
+      typeof data.referralEarnPaise === "number" ? data.referralEarnPaise : 0,
+      DEFAULT_TIERS
+    ),
   };
 }
 
@@ -816,7 +820,7 @@ export const firebaseApi = {
         reinvestPaise: upd.reinvestPaise,
         lifetimePaise: upd.lifetimePaise,
         referralEarnPaise: upd.referralEarnPaise,
-        tier: tierFromLifetime(upd.lifetimePaise, pool.tiers),
+        tier: tierFromReferralEarn(upd.referralEarnPaise, pool.tiers),
       });
     }
 

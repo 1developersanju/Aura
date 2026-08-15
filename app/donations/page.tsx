@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { RequireAuth } from "@/components/auth/RequireAuth";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { useProduct } from "@/components/providers/ProductProvider";
 import { getApi } from "@/lib/api";
 import { formatPaise } from "@/lib/money";
 import { nextTierProgress } from "@/lib/pool-config";
+import { usePageRefresh } from "@/lib/page-refresh";
+import { RefreshPageButton } from "@/components/RefreshPageButton";
 import type { LedgerEntry, PoolConfig, Voucher } from "@/lib/types";
 
 function HistoryPanel() {
@@ -18,7 +20,7 @@ function HistoryPanel() {
   const [loading, setLoading] = useState(true);
   const [redeeming, setRedeeming] = useState(false);
 
-  async function reload() {
+  const load = useCallback(async () => {
     if (!user) return;
     const api = getApi();
     try {
@@ -35,16 +37,13 @@ function HistoryPanel() {
     setVouchers(v);
     setPool(p);
     setLoading(false);
-  }
+  }, [user]);
 
-  useEffect(() => {
-    reload();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.uid]);
+  usePageRefresh(load);
 
   const progress = useMemo(() => {
     if (!user || !pool) return null;
-    return nextTierProgress(user.lifetimePaise, pool.tiers);
+    return nextTierProgress(user.referralEarnPaise, pool.tiers);
   }, [user, pool]);
 
   const claimablePaise = useMemo(
@@ -68,7 +67,7 @@ function HistoryPanel() {
     setRedeeming(true);
     try {
       await getApi().redeemOpenVouchers(user.uid);
-      await reload();
+      await load();
       await refreshUser();
     } finally {
       setRedeeming(false);
@@ -79,7 +78,10 @@ function HistoryPanel() {
 
   return (
     <div className="mx-auto w-full max-w-2xl px-4 py-16">
-      <h1 className="font-display text-3xl text-foreground">{nouns.history}</h1>
+      <div className="flex items-start justify-between gap-3">
+        <h1 className="font-display text-3xl text-foreground">{nouns.history}</h1>
+        <RefreshPageButton />
+      </div>
       <p className="mt-3 rounded-xl bg-accent/10 px-4 py-3 text-sm leading-relaxed text-accent ring-1 ring-accent/25">
         {isSupermarket
           ? "Your loyalty state stays private. Pool math and other shoppers are admin-only."

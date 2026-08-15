@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   Area,
@@ -14,6 +14,7 @@ import {
 import { ArrowRight } from "lucide-react";
 import { getApi } from "@/lib/api";
 import { formatPaise, paiseToRupees } from "@/lib/money";
+import { usePageRefresh } from "@/lib/page-refresh";
 import type { AuraUser, LedgerEntry, SystemWallet, Voucher, Wallet } from "@/lib/types";
 import {
   AdminLoading,
@@ -35,28 +36,28 @@ export default function AdminOverviewPage() {
   const [resetting, setResetting] = useState(false);
   const [flash, setFlash] = useState<string | null>(null);
 
-  useEffect(() => {
-    (async () => {
-      const api = getApi();
-      const [e, s, w, v, dest, u] = await Promise.all([
-        api.listEntries(),
-        api.listSystemWallets(),
-        api.listWallets(),
-        api.listAllVouchers(),
-        api.listDestinations(),
-        api.listUsers(),
-      ]);
-      setEntries(e);
-      setSystem(s);
-      setWallets(w);
-      setVouchers(v);
-      setUsers(u);
-      const names: Record<string, string> = {};
-      for (const d of dest) names[d.id] = d.name;
-      setDestNames(names);
-      setLoading(false);
-    })();
+  const load = useCallback(async () => {
+    const api = getApi();
+    const [e, s, w, v, dest, u] = await Promise.all([
+      api.listEntries(),
+      api.listSystemWallets(),
+      api.listWallets(),
+      api.listAllVouchers(),
+      api.listDestinations(),
+      api.listUsers(),
+    ]);
+    setEntries(e);
+    setSystem(s);
+    setWallets(w);
+    setVouchers(v);
+    setUsers(u);
+    const names: Record<string, string> = {};
+    for (const d of dest) names[d.id] = d.name;
+    setDestNames(names);
+    setLoading(false);
   }, []);
+
+  usePageRefresh(load);
 
   async function reloadWallets() {
     const api = getApi();

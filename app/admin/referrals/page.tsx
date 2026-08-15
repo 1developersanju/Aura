@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import Link from "next/link";
 import { getApi } from "@/lib/api";
+import { usePageRefresh } from "@/lib/page-refresh";
 import type { AuraUser } from "@/lib/types";
 import {
   AdminLoading,
@@ -15,12 +16,12 @@ export default function AdminReferralsPage() {
   const [users, setUsers] = useState<AuraUser[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    (async () => {
-      setUsers(await getApi().listUsers());
-      setLoading(false);
-    })();
+  const load = useCallback(async () => {
+    setUsers(await getApi().listUsers());
+    setLoading(false);
   }, []);
+
+  usePageRefresh(load);
 
   const byId = useMemo(() => {
     const map: Record<string, AuraUser> = {};

@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { getApi } from "@/lib/api";
 import { formatPaise } from "@/lib/money";
+import { usePageRefresh } from "@/lib/page-refresh";
 import type { AuraUser, LedgerEntry } from "@/lib/types";
 import {
   AdminLoading,
@@ -17,15 +18,15 @@ export default function AdminLedgerPage() {
   const [openId, setOpenId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    (async () => {
-      const api = getApi();
-      const [e, u] = await Promise.all([api.listEntries(), api.listUsers()]);
-      setEntries(e);
-      setUsers(u);
-      setLoading(false);
-    })();
+  const load = useCallback(async () => {
+    const api = getApi();
+    const [e, u] = await Promise.all([api.listEntries(), api.listUsers()]);
+    setEntries(e);
+    setUsers(u);
+    setLoading(false);
   }, []);
+
+  usePageRefresh(load);
 
   const userById = useMemo(() => {
     const map: Record<string, AuraUser> = {};

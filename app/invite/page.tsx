@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { RequireAuth } from "@/components/auth/RequireAuth";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { MAX_DIRECTS } from "@/lib/placement";
+import { RefreshPageButton } from "@/components/RefreshPageButton";
 
 function InvitePanel() {
   const { user } = useAuth();
@@ -24,7 +25,10 @@ function InvitePanel() {
 
   return (
     <div className="mx-auto w-full max-w-lg px-4 py-16">
-      <h1 className="font-display text-3xl text-foreground">Grow the network</h1>
+      <div className="flex items-start justify-between gap-3">
+        <h1 className="font-display text-3xl text-foreground">Grow the network</h1>
+        <RefreshPageButton />
+      </div>
       <p className="mt-2 text-sm text-muted">
         New members fill the next open slot in join order (up to {MAX_DIRECTS}{" "}
         under each person, then spillover left-to-right). Your link is for

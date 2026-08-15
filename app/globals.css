@@ -1,26 +1,114 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #0c1412;
+  --foreground: #e8f2ee;
+  --muted: #8aa399;
+  --accent: #3dd6a5;
+  --accent-fg: #04241c;
+  --panel: rgba(18, 32, 28, 0.72);
+  --glow: rgba(61, 214, 165, 0.18);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-accent-fg: var(--accent-fg);
+  --font-sans: var(--font-body);
+  --font-display: var(--font-display);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-body), system-ui, sans-serif;
+  min-height: 100%;
+}
+
+.font-display {
+  font-family: var(--font-display), Georgia, serif;
+}
+
+.glass {
+  background: var(--panel);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.aura-bg {
+  background:
+    radial-gradient(ellipse 80% 50% at 50% -10%, var(--glow), transparent 55%),
+    radial-gradient(ellipse 60% 40% at 100% 30%, rgba(34, 120, 100, 0.25), transparent 50%),
+    radial-gradient(ellipse 50% 35% at 0% 70%, rgba(20, 80, 70, 0.3), transparent 45%),
+    linear-gradient(180deg, #0a1210 0%, #0c1412 40%, #0e1a16 100%);
+}
+
+.input {
+  width: 100%;
+  border-radius: 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.25);
+  padding: 0.7rem 0.9rem;
+  color: var(--foreground);
+  outline: none;
+}
+
+.input.pl-10 {
+  padding-left: 2.5rem;
+}
+
+.input.pr-12 {
+  padding-right: 3rem;
+}
+
+.input:focus {
+  border-color: color-mix(in oklab, var(--accent) 60%, white);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 25%, transparent);
+}
+
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  border-radius: 0.75rem;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-weight: 600;
+  padding: 0.7rem 1.1rem;
+  transition: filter 0.15s ease, transform 0.15s ease;
+}
+
+.btn-primary:hover {
+  filter: brightness(1.08);
+}
+
+.btn-primary:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  border-radius: 0.75rem;
+  padding: 0.7rem 1.1rem;
+  color: var(--foreground);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  transition: background 0.15s ease;
+}
+
+.btn-ghost:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.panel {
+  border-radius: 1.25rem;
+  background: var(--panel);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 1.5rem;
 }

@@ -1,12 +1,12 @@
 import {
   GitBranch,
   LayoutDashboard,
-  Network,
   Percent,
   Receipt,
   Settings2,
   SlidersHorizontal,
   Target,
+  Armchair,
   type LucideIcon,
 } from "lucide-react";
 
@@ -45,10 +45,10 @@ export const adminNavGroups: AdminNavGroup[] = [
       },
       {
         href: "/admin/pool-tree",
-        label: "Network tree",
-        short: "Tree",
-        description: "Spillover placement and downlines",
-        icon: Network,
+        label: "House seating",
+        short: "House",
+        description: "Theatre seating and member split analytics",
+        icon: Armchair,
       },
     ],
   },

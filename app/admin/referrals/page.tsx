@@ -61,10 +61,10 @@ export default function AdminReferralsPage() {
     <div className="space-y-8">
       <PageHeader
         title="Referrals"
-        description="Tree parents follow sequential join-order placement. For the full network, use Network tree."
+        description="Tree parents follow sequential join-order placement. For the full house, use House seating."
         actions={
           <Link href="/admin/pool-tree" className="btn-ghost text-sm">
-            Open network tree
+            Open house seating
           </Link>
         }
       />

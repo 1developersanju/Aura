@@ -1,28 +1,25 @@
 "use client";
 
 import { useEffect, type ReactNode } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/components/providers/AuthProvider";
-
-function hardReplace(href: string) {
-  if (typeof window === "undefined") return;
-  if (window.location.pathname + window.location.search === href) return;
-  window.location.replace(href);
-}
 
 /** Donor-only routes — admins are sent to the admin panel. */
 export function RequireAuth({ children }: { children: ReactNode }) {
   const { user, ready, isAdmin } = useAuth();
+  const router = useRouter();
+  const pathname = usePathname();
 
   useEffect(() => {
     if (!ready) return;
     if (!user) {
-      hardReplace(`/login?next=${encodeURIComponent(window.location.pathname)}`);
+      router.replace(`/login?next=${encodeURIComponent(pathname)}`);
       return;
     }
     if (isAdmin) {
-      hardReplace("/admin");
+      router.replace("/admin");
     }
-  }, [ready, user, isAdmin]);
+  }, [ready, user, isAdmin, pathname, router]);
 
   if (!ready) {
     return (

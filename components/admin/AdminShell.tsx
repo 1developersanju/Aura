@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { LogOut, Menu, X } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { useAuth } from "@/components/providers/AuthProvider";
@@ -17,6 +17,7 @@ import {
 
 export function AdminShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
   const { user, signOut } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
   const current = findAdminNavItem(pathname);
@@ -28,7 +29,7 @@ export function AdminShell({ children }: { children: ReactNode }) {
 
   async function handleSignOut() {
     await signOut();
-    window.location.replace("/admin/login");
+    router.replace("/admin/login");
   }
 
   const nav = (
@@ -46,7 +47,6 @@ export function AdminShell({ children }: { children: ReactNode }) {
                 <li key={item.href}>
                   <Link
                     href={item.href}
-                    prefetch={false}
                     className={`group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition ${
                       active
                         ? "bg-accent/15 text-accent ring-1 ring-accent/35"
@@ -168,7 +168,6 @@ export function AdminShell({ children }: { children: ReactNode }) {
               <li key={item.href} className="flex-1">
                 <Link
                   href={item.href}
-                  prefetch={false}
                   className={`flex flex-col items-center gap-0.5 rounded-xl px-1 py-1.5 text-[10px] ${
                     active ? "text-accent" : "text-muted"
                   }`}
@@ -190,7 +189,7 @@ export function AdminShell({ children }: { children: ReactNode }) {
 
 function BrandBlock({ dataMode }: { dataMode: string }) {
   return (
-    <Link href="/admin" prefetch={false} className="group flex items-center gap-2.5">
+    <Link href="/admin" className="group flex items-center gap-2.5">
       <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-accent/20 ring-1 ring-accent/40">
         <span className="font-display text-lg text-accent">A</span>
       </span>

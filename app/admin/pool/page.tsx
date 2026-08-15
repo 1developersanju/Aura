@@ -112,7 +112,7 @@ export default function AdminPoolSettingsPage() {
 
       <Section
         title="Loyalty tiers"
-        description="Upgrade fees come from referral earn, then that fee is 4-way split (ops / charity / reinvest / referral) and the member is promoted. Thresholds are read-only for this POC."
+        description="Each tier is leftover referral earn vs these thresholds. When leftover covers the next unpaid fee, that fee is deducted and 4-way split. The badge then follows whatever earn is left — this applies to Silver, Gold, Diamond, and Platinum, not only ₹100."
       >
         <div className="space-y-2">
           {pool.tiers.map((t) => (
@@ -132,10 +132,11 @@ export default function AdminPoolSettingsPage() {
         </div>
         <div className="panel mt-4 space-y-3">
           <p className="text-sm text-muted">
-            Early members who were given a higher tier without paying, or who
-            already paid Silver and now have leftover earn below ₹100, are
-            aligned here. The badge follows leftover referral earn. Upgrade
-            fees already taken are not charged again.
+            The badge is leftover referral earn against every threshold
+            (₹1 / ₹100 / ₹1,000 / ₹10,000 / ₹1,00,000). Paying a fee does not
+            freeze that rank. If leftover falls below Gold, they are not Gold —
+            same for Diamond and Platinum. Fees already taken are not charged
+            again.
           </p>
           <button
             type="button"
@@ -144,7 +145,7 @@ export default function AdminPoolSettingsPage() {
             onClick={async () => {
               if (
                 !confirm(
-                  "Normalise legacy tiers? Members without paid fees will drop, then referral earn will be charged for upgrades they can afford."
+                  "Reset badges to leftover earn for every tier, then charge any unpaid fees they can still afford?"
                 )
               ) {
                 return;

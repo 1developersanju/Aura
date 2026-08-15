@@ -39,9 +39,10 @@ function mergeUpdates(
 }
 
 /**
- * Charge unpaid upgrade fees from referral earn when the leftover covers
- * the next fee. The badge follows leftover earn (pay Silver, leftover
- * under ₹100 → Starter again). Already-paid fees are not charged twice.
+ * Charge the next unpaid fee when leftover earn covers it, for every
+ * tier (Silver → Platinum). The badge is leftover earn vs all
+ * thresholds, so paying Gold then dropping below ₹1,000 is Starter or
+ * Silver — not a frozen Gold. Already-paid fees are not charged twice.
  */
 export function runReferralTierPromotions(input: {
   usersById: Record<string, RankedUser>;
@@ -147,8 +148,8 @@ export function tierFromFeesPaid(paidPaise: number, pool: PoolConfig): number {
 }
 
 /**
- * Drop unpaid legacy tiers back to what fees cover, then charge remaining
- * referral earn through the normal upgrade split until they cannot pay more.
+ * Drop gifted / frozen ranks to leftover earn (all tiers), then charge
+ * remaining earn through unpaid upgrade fees until they cannot pay more.
  */
 export function settleLegacyTiers(input: {
   usersById: Record<string, RankedUser>;

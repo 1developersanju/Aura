@@ -552,20 +552,21 @@ export const demoDb = {
 
     const now = new Date().toISOString();
     const voucherIds: string[] = [];
-    const addPaise = result.vouchersToSpawn * state.pool.unitPaise;
-    if (addPaise > 0) {
+    for (const [creditUid, addPaise] of Object.entries(result.voucherCredits)) {
+      if (addPaise <= 0) continue;
       const open = state.vouchers.find(
-        (v) => v.userId === userId && v.status === "open"
+        (v) => v.userId === creditUid && v.status === "open"
       );
       if (open) {
         open.valuePaise += addPaise;
         voucherIds.push(open.id);
       } else {
         const id = uid();
+        const holder = state.accounts.find((a) => a.uid === creditUid);
         state.vouchers.push({
           id,
-          userId,
-          code: `${actor.referralCode}_CREDIT`,
+          userId: creditUid,
+          code: `${holder?.referralCode ?? "REF"}_CREDIT`,
           valuePaise: addPaise,
           status: "open",
           createdAt: now,

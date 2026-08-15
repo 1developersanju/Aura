@@ -50,7 +50,7 @@ export default function HomePage() {
           {!ready
             ? ""
             : isSupermarket
-              ? "Record purchases into the loyalty pool. Earn reinvestment credits, unlock vouchers and tiers, and fund community charity — quietly, without exposing other shoppers."
+              ? "Record purchases into the loyalty pool. Reinvestment stays in your wallet; referral earn becomes claimable credit. Charity stays private."
               : "A blind donation system — you support Aura, and Aura routes funds to purpose wallets and partner charities behind the scenes."}
         </motion.p>
         <motion.div

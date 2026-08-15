@@ -12,7 +12,8 @@ export function formatPaise(paise: number): string {
   return new Intl.NumberFormat("en-IN", {
     style: "currency",
     currency: "INR",
-    maximumFractionDigits: 2,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 4,
   }).format(paiseToRupees(paise));
 }
 
@@ -21,6 +22,7 @@ export function formatMoney(rupees: number): string {
   return new Intl.NumberFormat("en-IN", {
     style: "currency",
     currency: "INR",
-    maximumFractionDigits: 2,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 4,
   }).format(rupees);
 }

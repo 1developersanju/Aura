@@ -3,6 +3,7 @@ import { Fraunces, Outfit } from "next/font/google";
 import { AuthProvider } from "@/components/providers/AuthProvider";
 import { ProductProvider } from "@/components/providers/ProductProvider";
 import { SiteNav } from "@/components/nav/SiteNav";
+import { SiteReleaseFooter } from "@/components/SiteReleaseFooter";
 import "./globals.css";
 
 const display = Fraunces({
@@ -35,6 +36,7 @@ export default function RootLayout({
           <ProductProvider>
             <SiteNav />
             <main className="flex flex-1 flex-col">{children}</main>
+            <SiteReleaseFooter />
           </ProductProvider>
         </AuthProvider>
       </body>

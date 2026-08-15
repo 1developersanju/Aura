@@ -26,7 +26,7 @@ export function splitPaiseByPercent(
     const isLast = index === allocations.length - 1;
     const part = isLast
       ? amountPaise - allocated
-      : Math.floor((amountPaise * alloc.percent) / 100);
+      : (amountPaise * alloc.percent) / 100;
     if (!isLast) allocated += part;
     results.push({
       destinationId: alloc.destinationId,
@@ -45,10 +45,11 @@ export function equalSplitPaise(
   if (recipientCount <= 0) {
     return { shares: [], dust: totalPaise };
   }
-  const base = Math.floor(totalPaise / recipientCount);
-  const shares = Array.from({ length: recipientCount }, () => base);
-  const used = base * recipientCount;
-  return { shares, dust: totalPaise - used };
+  const share = totalPaise / recipientCount;
+  return {
+    shares: Array.from({ length: recipientCount }, () => share),
+    dust: 0,
+  };
 }
 
 export type EngineUser = {
@@ -77,7 +78,8 @@ export type ProcessEntryResult = {
     string,
     { reinvestPaise: number; lifetimePaise: number; referralEarnPaise: number }
   >;
-  vouchersToSpawn: number;
+  /** Referral earn credited as claimable voucher balance, by user. */
+  voucherCredits: Record<string, number>;
   systemOpsDelta: number;
   systemCharityDelta: number;
   systemDustDelta: number;
@@ -117,31 +119,25 @@ export function processEntryUnits(input: ProcessEntryInput): ProcessEntryResult 
   const unitCount = amountPaise / unit;
   const { ops, charity, reinvest, referral } = pool.splits;
 
-  let opsPaise = 0;
-  let charityPaise = 0;
-  let reinvestPaise = 0;
-  let referralPaise = 0;
-  let dustPaise = 0;
+  const opsPaise = ops * unitCount;
+  const charityPaise = charity * unitCount;
+  const reinvestPaise = reinvest * unitCount;
+  const referralPaise = referral * unitCount;
 
   const referralPayouts: ReferralPayout[] = [];
   const earnDelta: Record<string, number> = {};
 
-  for (let u = 0; u < unitCount; u++) {
-    opsPaise += ops;
-    charityPaise += charity;
-    reinvestPaise += reinvest;
-    referralPaise += referral;
-
-    const upline = climbUpline(userId, usersById, pool.referralDepth);
-    const { shares, dust } = equalSplitPaise(referral, upline.length);
-    dustPaise += dust;
-    upline.forEach((uid, idx) => {
-      const amount = shares[idx] ?? 0;
-      if (amount <= 0) return;
-      referralPayouts.push({ userId: uid, level: idx + 1, amountPaise: amount });
-      earnDelta[uid] = (earnDelta[uid] ?? 0) + amount;
-    });
-  }
+  const upline = climbUpline(userId, usersById, pool.referralDepth);
+  const { shares, dust: dustPaise } = equalSplitPaise(
+    referralPaise,
+    upline.length
+  );
+  upline.forEach((uid, idx) => {
+    const amount = shares[idx] ?? 0;
+    if (amount <= 0) return;
+    referralPayouts.push({ userId: uid, level: idx + 1, amountPaise: amount });
+    earnDelta[uid] = (earnDelta[uid] ?? 0) + amount;
+  });
 
   const charityParts = splitPaiseByPercent(
     charityPaise,
@@ -152,16 +148,9 @@ export function processEntryUnits(input: ProcessEntryInput): ProcessEntryResult 
   const actor = usersById[userId];
   if (!actor) throw new Error("User not found for entry.");
 
-  let newReinvest = actor.reinvestPaise + reinvestPaise;
-  let vouchersToSpawn = 0;
-  while (newReinvest >= unit) {
-    newReinvest -= unit;
-    vouchersToSpawn += 1;
-  }
-
   const userUpdates: ProcessEntryResult["userUpdates"] = {
     [userId]: {
-      reinvestPaise: newReinvest,
+      reinvestPaise: actor.reinvestPaise + reinvestPaise,
       lifetimePaise: actor.lifetimePaise + amountPaise,
       referralEarnPaise: actor.referralEarnPaise,
     },
@@ -184,7 +173,7 @@ export function processEntryUnits(input: ProcessEntryInput): ProcessEntryResult 
     charityAllocations: charityParts,
     referralPayouts,
     userUpdates,
-    vouchersToSpawn,
+    voucherCredits: { ...earnDelta },
     systemOpsDelta: opsPaise,
     systemCharityDelta: charityPaise,
     systemDustDelta: dustPaise,

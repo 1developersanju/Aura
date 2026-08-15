@@ -730,7 +730,7 @@ export const firebaseApi = {
 
     const usersSnap = await getDocs(collection(db, "users"));
     const usersById: Record<string, EngineUser> = {};
-    let actorReferralCode = "";
+    const referralCodes: Record<string, string> = {};
     for (const d of usersSnap.docs) {
       const mapped = mapAuraUser(d.id, d.data() as Record<string, unknown>);
       usersById[d.id] = {
@@ -740,7 +740,7 @@ export const firebaseApi = {
         lifetimePaise: mapped.lifetimePaise,
         referralEarnPaise: mapped.referralEarnPaise,
       };
-      if (d.id === userId) actorReferralCode = mapped.referralCode;
+      referralCodes[d.id] = mapped.referralCode;
     }
     if (!usersById[userId]) throw new Error("User not found.");
 
@@ -767,16 +767,18 @@ export const firebaseApi = {
       destinationNames: names,
     });
 
-    const existingVouchers = await this.listVouchersForUser(userId);
+    const existingVouchers = await this.listAllVouchers();
     const nowIso = new Date().toISOString();
     const entryRef = doc(collection(db, "entries"));
     const voucherIds: string[] = [];
-    const addPaise = result.vouchersToSpawn * pool.unitPaise;
 
     const batch = writeBatch(db);
 
-    if (addPaise > 0) {
-      const open = existingVouchers.find((v) => v.status === "open");
+    for (const [uid, addPaise] of Object.entries(result.voucherCredits)) {
+      if (addPaise <= 0) continue;
+      const open = existingVouchers.find(
+        (v) => v.userId === uid && v.status === "open"
+      );
       if (open) {
         voucherIds.push(open.id);
         batch.update(doc(db, "vouchers", open.id), {
@@ -786,8 +788,8 @@ export const firebaseApi = {
         const voucherRef = doc(collection(db, "vouchers"));
         voucherIds.push(voucherRef.id);
         batch.set(voucherRef, {
-          userId,
-          code: `${actorReferralCode}_CREDIT`,
+          userId: uid,
+          code: `${referralCodes[uid] ?? "REF"}_CREDIT`,
           valuePaise: addPaise,
           status: "open",
           createdAt: serverTimestamp(),

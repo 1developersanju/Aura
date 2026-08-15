@@ -128,7 +128,7 @@ function HistoryPanel() {
       <section className="mt-8">
         <h2 className="font-display text-xl">Available to claim</h2>
         <p className="mt-1 text-sm text-muted">
-          Your reinvestment credit as one total — not separate vouchers.
+          Your referral earn as one claimable total.
         </p>
         <div className="panel mt-3 space-y-4 py-5">
           <div className="flex flex-wrap items-end justify-between gap-4">
@@ -159,8 +159,8 @@ function HistoryPanel() {
           )}
           {claimablePaise === 0 && vouchers.length === 0 && (
             <p className="text-sm text-muted">
-              No credit yet — keep entering amounts; reinvestment unlocks whole
-              rupees here.
+              No referral credit yet — it appears here when people in your
+              downline enter amounts.
             </p>
           )}
           {claimablePaise === 0 && vouchers.length > 0 && (

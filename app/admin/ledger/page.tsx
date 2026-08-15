@@ -151,7 +151,7 @@ export default function AdminLedgerPage() {
                     </div>
                 {e.vouchersSpawned.length > 0 && (
                   <p className="rounded-lg bg-accent/10 px-3 py-2 text-accent">
-                    Voucher credit added (reinvest unlock)
+                    Voucher credit added (referral earn)
                   </p>
                 )}
                   </div>

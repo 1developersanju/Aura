@@ -6,6 +6,8 @@ import { LogOut, Menu, X } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { getDataMode } from "@/lib/api";
+import { releaseLabel } from "@/lib/release";
+import { ReleaseFooter } from "@/components/ReleaseFooter";
 import {
   adminNavFlat,
   adminNavGroups,
@@ -149,6 +151,7 @@ export function AdminShell({ children }: { children: ReactNode }) {
 
         <div className="min-w-0 flex-1 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
           {children}
+          <ReleaseFooter className="mt-10 pb-2 lg:pb-0" />
         </div>
       </div>
 
@@ -213,6 +216,9 @@ function UserFooter({
   return (
     <div className="mt-auto border-t border-white/8 px-2 pt-4">
       <p className="truncate px-1 text-xs text-muted">{userName ?? "Admin"}</p>
+      <p className="mt-1 px-1 text-[10px] tabular-nums tracking-wide text-muted/70">
+        {releaseLabel()}
+      </p>
       <button
         type="button"
         onClick={onSignOut}

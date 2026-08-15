@@ -10,6 +10,7 @@ import { usePageRefresh } from "@/lib/page-refresh";
 import { MAX_DIRECTS } from "@/lib/placement";
 import { buildTheaterRows, setSwatch, type EmptySeat, type FilledSeat, type SetSwatch } from "@/lib/seating";
 import { DEFAULT_TIERS } from "@/lib/pool-config";
+import type { AuraUser, LedgerEntry, Voucher } from "@/lib/types";
 import {
   AdminLoading,
   EmptyState,

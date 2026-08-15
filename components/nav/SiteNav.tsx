@@ -75,22 +75,28 @@ export function SiteNav() {
           })}
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 items-center gap-2">
           {user ? (
             <>
-              <span className="hidden max-w-[140px] truncate text-xs text-muted sm:inline">
-                {user.displayName}
-              </span>
+              <div className="min-w-0 text-right leading-tight">
+                <p className="max-w-[8.5rem] truncate text-xs font-medium text-foreground sm:max-w-[12rem]">
+                  {user.displayName}
+                </p>
+                <p className="max-w-[8.5rem] truncate text-[10px] text-muted sm:max-w-[12rem]">
+                  {user.email}
+                </p>
+              </div>
               <button
                 type="button"
                 onClick={async () => {
                   await signOut();
                   router.push("/");
                 }}
-                className="inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-sm text-muted ring-1 ring-white/10 transition hover:text-foreground"
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-xl px-3 py-2 text-sm text-muted ring-1 ring-white/10 transition hover:text-foreground"
+                aria-label="Sign out"
               >
                 <LogOut className="h-3.5 w-3.5" />
-                Out
+                <span className="hidden sm:inline">Out</span>
               </button>
             </>
           ) : (

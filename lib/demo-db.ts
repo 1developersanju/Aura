@@ -467,6 +467,48 @@ export const demoDb = {
     return v;
   },
 
+  async redeemOpenVouchers(
+    userId: string
+  ): Promise<{ count: number; valuePaise: number }> {
+    const state = read();
+    const now = new Date().toISOString();
+    let count = 0;
+    let valuePaise = 0;
+    for (const v of state.vouchers) {
+      if (v.userId !== userId || v.status !== "open") continue;
+      v.status = "redeemed";
+      v.redeemedAt = now;
+      count += 1;
+      valuePaise += v.valuePaise;
+    }
+    if (count === 0) throw new Error("No open voucher balance to redeem.");
+    write(state);
+    return { count, valuePaise };
+  },
+
+  async consolidateOpenVouchers(
+    userId: string
+  ): Promise<{ valuePaise: number; merged: number }> {
+    const state = read();
+    const open = state.vouchers
+      .filter((v) => v.userId === userId && v.status === "open")
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    if (open.length <= 1) {
+      return { valuePaise: open[0]?.valuePaise ?? 0, merged: 0 };
+    }
+    const keeper = open[0]!;
+    const extras = open.slice(1);
+    const total = open.reduce((s, v) => s + v.valuePaise, 0);
+    keeper.valuePaise = total;
+    keeper.code = keeper.code.includes("_CREDIT")
+      ? keeper.code
+      : `${keeper.code.split("_")[0] ?? "AURA"}_CREDIT`;
+    const drop = new Set(extras.map((v) => v.id));
+    state.vouchers = state.vouchers.filter((v) => !drop.has(v.id));
+    write(state);
+    return { valuePaise: total, merged: extras.length };
+  },
+
   async createEntry(userId: string, amountRupees: number): Promise<LedgerEntry> {
     const amountPaise = rupeesToPaise(amountRupees);
     const state = read();
@@ -502,19 +544,27 @@ export const demoDb = {
 
     const now = new Date().toISOString();
     const voucherIds: string[] = [];
-    for (let i = 0; i < result.vouchersToSpawn; i++) {
-      const id = uid();
-      const code = `${actor.referralCode}_VOUCHER_${state.vouchers.filter((v) => v.userId === userId).length + i + 1}`;
-      state.vouchers.push({
-        id,
-        userId,
-        code,
-        valuePaise: state.pool.unitPaise,
-        status: "open",
-        createdAt: now,
-        redeemedAt: null,
-      });
-      voucherIds.push(id);
+    const addPaise = result.vouchersToSpawn * state.pool.unitPaise;
+    if (addPaise > 0) {
+      const open = state.vouchers.find(
+        (v) => v.userId === userId && v.status === "open"
+      );
+      if (open) {
+        open.valuePaise += addPaise;
+        voucherIds.push(open.id);
+      } else {
+        const id = uid();
+        state.vouchers.push({
+          id,
+          userId,
+          code: `${actor.referralCode}_CREDIT`,
+          valuePaise: addPaise,
+          status: "open",
+          createdAt: now,
+          redeemedAt: null,
+        });
+        voucherIds.push(id);
+      }
     }
 
     for (const [uidKey, upd] of Object.entries(result.userUpdates)) {

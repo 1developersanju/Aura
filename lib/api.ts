@@ -55,6 +55,10 @@ type Api = {
   listVouchersForUser(userId: string): Promise<Voucher[]>;
   listAllVouchers(): Promise<Voucher[]>;
   redeemVoucher(voucherId: string, userId: string): Promise<Voucher>;
+  /** Mark every open voucher for the user as redeemed (whole balance). */
+  redeemOpenVouchers(userId: string): Promise<{ count: number; valuePaise: number }>;
+  /** Merge stacked open ₹1 vouchers into one claimable balance. */
+  consolidateOpenVouchers(userId: string): Promise<{ valuePaise: number; merged: number }>;
   createEntry(userId: string, amountRupees: number): Promise<LedgerEntry>;
   createDonation(userId: string, amount: number): Promise<Donation>;
   listDonationsForUser(userId: string): Promise<Donation[]>;

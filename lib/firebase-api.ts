@@ -663,6 +663,55 @@ export const firebaseApi = {
     });
   },
 
+  async redeemOpenVouchers(
+    userId: string
+  ): Promise<{ count: number; valuePaise: number }> {
+    const db = getFirestoreDb()!;
+    const open = (await this.listVouchersForUser(userId)).filter(
+      (v) => v.status === "open"
+    );
+    if (open.length === 0) throw new Error("No open voucher balance to redeem.");
+    const batch = writeBatch(db);
+    let valuePaise = 0;
+    for (const v of open) {
+      valuePaise += v.valuePaise;
+      batch.update(doc(db, "vouchers", v.id), {
+        status: "redeemed",
+        redeemedAt: serverTimestamp(),
+      });
+    }
+    await batch.commit();
+    return { count: open.length, valuePaise };
+  },
+
+  async consolidateOpenVouchers(
+    userId: string
+  ): Promise<{ valuePaise: number; merged: number }> {
+    const db = getFirestoreDb()!;
+    const open = (await this.listVouchersForUser(userId))
+      .filter((v) => v.status === "open")
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    if (open.length <= 1) {
+      return { valuePaise: open[0]?.valuePaise ?? 0, merged: 0 };
+    }
+    const keeper = open[0]!;
+    const extras = open.slice(1);
+    const total = open.reduce((s, v) => s + v.valuePaise, 0);
+    const batch = writeBatch(db);
+    const code = keeper.code.includes("_CREDIT")
+      ? keeper.code
+      : `${keeper.code.split("_")[0] ?? "AURA"}_CREDIT`;
+    batch.update(doc(db, "vouchers", keeper.id), {
+      valuePaise: total,
+      code,
+    });
+    for (const v of extras) {
+      batch.delete(doc(db, "vouchers", v.id));
+    }
+    await batch.commit();
+    return { valuePaise: total, merged: extras.length };
+  },
+
   async createEntry(userId: string, amountRupees: number): Promise<LedgerEntry> {
     if (!Number.isFinite(amountRupees) || amountRupees <= 0) {
       throw new Error("Enter a positive entry amount.");
@@ -714,24 +763,30 @@ export const firebaseApi = {
     const nowIso = new Date().toISOString();
     const entryRef = doc(collection(db, "entries"));
     const voucherIds: string[] = [];
-    const voucherDocs: Voucher[] = [];
-
-    for (let i = 0; i < result.vouchersToSpawn; i++) {
-      const voucherRef = doc(collection(db, "vouchers"));
-      const code = `${actorReferralCode}_VOUCHER_${existingVouchers.length + i + 1}`;
-      voucherIds.push(voucherRef.id);
-      voucherDocs.push({
-        id: voucherRef.id,
-        userId,
-        code,
-        valuePaise: pool.unitPaise,
-        status: "open",
-        createdAt: nowIso,
-        redeemedAt: null,
-      });
-    }
+    const addPaise = result.vouchersToSpawn * pool.unitPaise;
 
     const batch = writeBatch(db);
+
+    if (addPaise > 0) {
+      const open = existingVouchers.find((v) => v.status === "open");
+      if (open) {
+        voucherIds.push(open.id);
+        batch.update(doc(db, "vouchers", open.id), {
+          valuePaise: increment(addPaise),
+        });
+      } else {
+        const voucherRef = doc(collection(db, "vouchers"));
+        voucherIds.push(voucherRef.id);
+        batch.set(voucherRef, {
+          userId,
+          code: `${actorReferralCode}_CREDIT`,
+          valuePaise: addPaise,
+          status: "open",
+          createdAt: serverTimestamp(),
+          redeemedAt: null,
+        });
+      }
+    }
 
     batch.set(entryRef, {
       userId,
@@ -788,17 +843,6 @@ export const firebaseApi = {
         },
         { merge: true }
       );
-    }
-
-    for (const voucher of voucherDocs) {
-      batch.set(doc(db, "vouchers", voucher.id), {
-        userId: voucher.userId,
-        code: voucher.code,
-        valuePaise: voucher.valuePaise,
-        status: voucher.status,
-        createdAt: serverTimestamp(),
-        redeemedAt: null,
-      });
     }
 
     await batch.commit();

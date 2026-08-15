@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { getApi } from "@/lib/api";
-import { formatPaise, paiseToRupees } from "@/lib/money";
+import { formatPaise } from "@/lib/money";
 import type { AuraUser, LedgerEntry } from "@/lib/types";
 import {
   AdminLoading,
@@ -149,12 +149,11 @@ export default function AdminLedgerPage() {
                         </ul>
                       )}
                     </div>
-                    {e.vouchersSpawned.length > 0 && (
-                      <p className="rounded-lg bg-accent/10 px-3 py-2 text-accent">
-                        Vouchers spawned: {e.vouchersSpawned.length} (₹
-                        {paiseToRupees(100)} each)
-                      </p>
-                    )}
+                {e.vouchersSpawned.length > 0 && (
+                  <p className="rounded-lg bg-accent/10 px-3 py-2 text-accent">
+                    Voucher credit added (reinvest unlock)
+                  </p>
+                )}
                   </div>
                 )}
               </article>

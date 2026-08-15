@@ -94,8 +94,16 @@ export default function AdminOverviewPage() {
     [entries]
   );
 
-  const openVouchers = useMemo(
-    () => vouchers.filter((v) => v.status === "open").length,
+  const openVoucherPaise = useMemo(
+    () =>
+      vouchers
+        .filter((v) => v.status === "open")
+        .reduce((sum, v) => sum + v.valuePaise, 0),
+    [vouchers]
+  );
+
+  const totalVoucherPaise = useMemo(
+    () => vouchers.reduce((sum, v) => sum + v.valuePaise, 0),
     [vouchers]
   );
 
@@ -173,9 +181,9 @@ export default function AdminOverviewPage() {
         />
         <StatCard label="Entries" value={entries.length} />
         <StatCard
-          label="Vouchers"
-          value={vouchers.length}
-          hint={`${openVouchers} open`}
+          label="Voucher credit"
+          value={formatPaise(totalVoucherPaise)}
+          hint={`${formatPaise(openVoucherPaise)} open`}
         />
       </div>
 

@@ -83,24 +83,27 @@ export function AdminShell({ children }: { children: ReactNode }) {
         <div className="flex items-center justify-between gap-3">
           <button
             type="button"
-            className="inline-flex h-10 w-10 items-center justify-center rounded-xl ring-1 ring-white/10 text-foreground"
+            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ring-1 ring-white/10 text-foreground"
             aria-label={mobileOpen ? "Close menu" : "Open menu"}
             onClick={() => setMobileOpen((o) => !o)}
           >
             {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
           </button>
-          <div className="min-w-0 text-center">
+          <div className="min-w-0 flex-1 text-center">
             <p className="truncate font-display text-base text-foreground">
               {current.label}
             </p>
-            <p className="text-[10px] uppercase tracking-[0.14em] text-muted">
-              Aura admin
+            <p className="truncate text-[11px] text-muted">
+              {user?.displayName ?? "Admin"}
+              {user?.email ? (
+                <span className="text-muted/70"> · {user.email}</span>
+              ) : null}
             </p>
           </div>
           <button
             type="button"
             onClick={handleSignOut}
-            className="inline-flex h-10 w-10 items-center justify-center rounded-xl text-muted ring-1 ring-white/10"
+            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-muted ring-1 ring-white/10"
             aria-label="Sign out"
           >
             <LogOut className="h-4 w-4" />

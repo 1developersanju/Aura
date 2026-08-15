@@ -16,11 +16,16 @@ function HistoryPanel() {
   const [vouchers, setVouchers] = useState<Voucher[]>([]);
   const [pool, setPool] = useState<PoolConfig | null>(null);
   const [loading, setLoading] = useState(true);
-  const [busyId, setBusyId] = useState<string | null>(null);
+  const [redeeming, setRedeeming] = useState(false);
 
   async function reload() {
     if (!user) return;
     const api = getApi();
+    try {
+      await api.consolidateOpenVouchers(user.uid);
+    } catch {
+      /* consolidate is best-effort for legacy stacks */
+    }
     const [e, v, p] = await Promise.all([
       api.listEntriesForUser(user.uid),
       api.listVouchersForUser(user.uid),
@@ -42,15 +47,31 @@ function HistoryPanel() {
     return nextTierProgress(user.lifetimePaise, pool.tiers);
   }, [user, pool]);
 
-  async function redeem(id: string) {
-    if (!user) return;
-    setBusyId(id);
+  const claimablePaise = useMemo(
+    () =>
+      vouchers
+        .filter((v) => v.status === "open")
+        .reduce((sum, v) => sum + v.valuePaise, 0),
+    [vouchers]
+  );
+
+  const claimedPaise = useMemo(
+    () =>
+      vouchers
+        .filter((v) => v.status === "redeemed")
+        .reduce((sum, v) => sum + v.valuePaise, 0),
+    [vouchers]
+  );
+
+  async function claimAll() {
+    if (!user || claimablePaise <= 0) return;
+    setRedeeming(true);
     try {
-      await getApi().redeemVoucher(id, user.uid);
+      await getApi().redeemOpenVouchers(user.uid);
       await reload();
       await refreshUser();
     } finally {
-      setBusyId(null);
+      setRedeeming(false);
     }
   }
 
@@ -105,36 +126,46 @@ function HistoryPanel() {
       )}
 
       <section className="mt-8">
-        <h2 className="font-display text-xl">Vouchers</h2>
-        <div className="mt-3 space-y-2">
-          {vouchers.length === 0 && (
-            <p className="text-sm text-muted">
-              No vouchers yet — reinvestment hits ₹1 to spawn one.
+        <h2 className="font-display text-xl">Available to claim</h2>
+        <p className="mt-1 text-sm text-muted">
+          Your reinvestment credit as one total — not separate vouchers.
+        </p>
+        <div className="panel mt-3 space-y-4 py-5">
+          <div className="flex flex-wrap items-end justify-between gap-4">
+            <div>
+              <p className="text-xs uppercase tracking-[0.14em] text-muted">
+                Claimable now
+              </p>
+              <p className="mt-1 font-display text-4xl tracking-tight text-accent">
+                {formatPaise(claimablePaise)}
+              </p>
+            </div>
+            {claimablePaise > 0 && (
+              <button
+                type="button"
+                className="btn-primary"
+                disabled={redeeming}
+                onClick={claimAll}
+              >
+                {redeeming ? "Claiming…" : "Claim total"}
+              </button>
+            )}
+          </div>
+          {claimedPaise > 0 && (
+            <p className="border-t border-white/10 pt-3 text-sm text-muted">
+              Already claimed{" "}
+              <span className="text-foreground">{formatPaise(claimedPaise)}</span>
             </p>
           )}
-          {vouchers.map((v) => (
-            <div
-              key={v.id}
-              className="panel flex flex-wrap items-center justify-between gap-3 py-3"
-            >
-              <div>
-                <p className="font-mono text-sm text-accent">{v.code}</p>
-                <p className="text-xs text-muted">
-                  {formatPaise(v.valuePaise)} · {v.status}
-                </p>
-              </div>
-              {v.status === "open" && (
-                <button
-                  type="button"
-                  className="btn-ghost text-sm"
-                  disabled={busyId === v.id}
-                  onClick={() => redeem(v.id)}
-                >
-                  {busyId === v.id ? "…" : "Mark redeemed"}
-                </button>
-              )}
-            </div>
-          ))}
+          {claimablePaise === 0 && vouchers.length === 0 && (
+            <p className="text-sm text-muted">
+              No credit yet — keep entering amounts; reinvestment unlocks whole
+              rupees here.
+            </p>
+          )}
+          {claimablePaise === 0 && vouchers.length > 0 && (
+            <p className="text-sm text-muted">Nothing left to claim right now.</p>
+          )}
         </div>
       </section>
 
